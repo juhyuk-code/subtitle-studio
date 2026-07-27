@@ -1,0 +1,23 @@
+[project]
+name = "subtitle-studio-api"
+version = "0.1.0"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+  "fastapi>=0.115,<1",
+  "uvicorn[standard]>=0.34,<1",
+  "python-multipart>=0.0.20,<1",
+  "httpx>=0.28,<1",
+  "pydantic>=2.10,<3",
+  "python-dotenv>=1.0,<2"
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3,<9"]
+desktop = [
+  "faster-whisper>=1.2,<2",
+  "pyinstaller>=6.15,<7",
+  "pywebview>=6.1,<7"
+]
+
+[tool.pytest.ini_options]
+testpaths = ["backend/tests"]

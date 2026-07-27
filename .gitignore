@@ -1,0 +1,15 @@
+node_modules/
+dist/
+release/
+.desktop-build/
+Subtitle Studio.app/
+.venv/
+data/
+*.sqlite3
+__pycache__/
+.pytest_cache/
+.DS_Store
+*.egg-info/
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
