@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
-import { npmCommand } from "./platform-commands.mjs";
+import { commandNeedsShell, npmCommand } from "./platform-commands.mjs";
 
 const projectRoot = process.cwd();
 const python =
@@ -19,8 +19,9 @@ function run(command, args) {
   const result = spawnSync(command, args, {
     cwd: projectRoot,
     stdio: "inherit",
-    shell: false
+    shell: commandNeedsShell(command)
   });
+  if (result.error) console.error(result.error);
   if (result.status !== 0) process.exit(result.status ?? 1);
 }
 
