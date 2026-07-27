@@ -2,6 +2,8 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
+import { npmCommand } from "./platform-commands.mjs";
+
 const projectRoot = process.cwd();
 const python =
   process.platform === "win32"
@@ -22,7 +24,7 @@ function run(command, args) {
   if (result.status !== 0) process.exit(result.status ?? 1);
 }
 
-run("npm", ["run", "build"]);
+run(npmCommand(), ["run", "build"]);
 
 const release = join(projectRoot, "release");
 const work = join(projectRoot, ".desktop-build");
