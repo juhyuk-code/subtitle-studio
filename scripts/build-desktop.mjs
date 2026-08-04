@@ -1,10 +1,20 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  rmSync,
+  writeFileSync
+} from "node:fs";
 import { join } from "node:path";
 
-import { commandNeedsShell, npmCommand } from "./platform-commands.mjs";
+import {
+  commandNeedsShell,
+  desktopUserDataRoot
+} from "./platform-commands.mjs";
 
 const projectRoot = process.cwd();
+const stageUpdate = process.argv.includes("--stage-update");
 const python =
   process.platform === "win32"
     ? join(projectRoot, ".venv", "Scripts", "python.exe")
@@ -25,11 +35,20 @@ function run(command, args) {
   if (result.status !== 0) process.exit(result.status ?? 1);
 }
 
-run(npmCommand(), ["run", "build"]);
+run(process.execPath, [join(projectRoot, "node_modules", "typescript", "bin", "tsc"), "-b"]);
+run(process.execPath, [join(projectRoot, "node_modules", "vite", "bin", "vite.js"), "build"]);
+run(python, [join(projectRoot, "scripts", "create_app_icons.py")]);
 
-const release = join(projectRoot, "release");
-const work = join(projectRoot, ".desktop-build");
-mkdirSync(release, { recursive: true });
+const releaseRoot = join(projectRoot, "release");
+const release = stageUpdate
+  ? join(desktopUserDataRoot(), "_update")
+  : releaseRoot;
+const work = join(
+  projectRoot,
+  stageUpdate ? ".desktop-update-build" : ".desktop-build"
+);
+mkdirSync(releaseRoot, { recursive: true });
+if (stageUpdate) rmSync(release, { recursive: true, force: true });
 rmSync(work, { recursive: true, force: true });
 
 run(python, [
@@ -43,3 +62,23 @@ run(python, [
   work,
   join(projectRoot, "packaging", "subtitle_studio.spec")
 ]);
+
+if (process.platform === "win32") {
+  copyFileSync(
+    join(projectRoot, "QUICK_START_KO.md"),
+    join(release, "Subtitle Studio", "Subtitle Studio Korean Quick Start.md")
+  );
+  copyFileSync(
+    join(projectRoot, "USER_MANUAL.md"),
+    join(release, "Subtitle Studio", "Subtitle Studio User Manual.md")
+  );
+}
+
+if (stageUpdate) {
+  writeFileSync(
+    join(release, ".subtitle-studio-update.json"),
+    JSON.stringify({ built_at: new Date().toISOString() }, null, 2),
+    "utf8"
+  );
+  console.log("Update ready. Open Settings in Subtitle Studio and choose Apply update & restart.");
+}

@@ -1,6 +1,6 @@
 import re
 
-from .models import TimestampClip
+from .models import NavigationMarker, TimestampClip
 
 TIMESTAMP_LINE = re.compile(
     r"^(?P<timestamp>\d{1,3}:\d{2}(?::\d{2})?)\s+(?P<title>.+?)\s*$"
@@ -20,7 +20,9 @@ def timestamp_to_ms(value: str) -> int:
     return (hours * 3600 + minutes * 60 + seconds) * 1000
 
 
-def parse_timestamp_clips(text: str, duration_ms: int) -> list[TimestampClip]:
+def _parse_timestamp_starts(
+    text: str, duration_ms: int
+) -> list[tuple[int, str]]:
     starts: list[tuple[int, str]] = []
     for line_number, raw_line in enumerate(text.splitlines(), start=1):
         line = raw_line.strip()
@@ -46,6 +48,25 @@ def parse_timestamp_clips(text: str, duration_ms: int) -> list[TimestampClip]:
         raise ValueError("Upload media before importing timestamps.")
     if starts[-1][0] >= duration_ms:
         raise ValueError("The final timestamp must be before the end of the media.")
+    return starts
+
+
+def parse_timestamp_markers(
+    text: str, duration_ms: int
+) -> list[NavigationMarker]:
+    starts = _parse_timestamp_starts(text, duration_ms)
+    return [
+        NavigationMarker(
+            marker_id=f"marker_{index + 1:03d}",
+            timestamp_ms=timestamp_ms,
+            title=title,
+        )
+        for index, (timestamp_ms, title) in enumerate(starts)
+    ]
+
+
+def parse_timestamp_clips(text: str, duration_ms: int) -> list[TimestampClip]:
+    starts = _parse_timestamp_starts(text, duration_ms)
 
     return [
         TimestampClip(

@@ -3,11 +3,17 @@ import shutil
 import sys
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_all
+from PyInstaller.utils.hooks import collect_all, collect_data_files
 
 
 project_root = Path(SPECPATH).parent
 path_suffix = ".exe" if sys.platform == "win32" else ""
+icon_suffix = ".icns" if sys.platform == "darwin" else ".ico"
+icon_path = project_root / "packaging" / "generated" / f"SubtitleStudio{icon_suffix}"
+codesign_identity = os.environ.get("SUBTITLE_STUDIO_CODESIGN_IDENTITY") or None
+target_arch = os.environ.get("SUBTITLE_STUDIO_TARGET_ARCH") or None
+entitlements_path = project_root / "packaging" / "macos-entitlements.plist"
+app_version = os.environ.get("SUBTITLE_STUDIO_VERSION", "0.1.0")
 
 
 def required_binary(name):
@@ -20,18 +26,28 @@ def required_binary(name):
     return (source, "bin")
 
 
-datas = [(str(project_root / "dist"), "dist")]
+datas = [
+    (str(project_root / "dist"), "dist"),
+    (str(project_root / "USER_MANUAL.md"), "docs"),
+    (str(project_root / "QUICK_START_KO.md"), "docs"),
+]
+datas += collect_data_files("lightning_fabric")
 binaries = [required_binary("ffmpeg"), required_binary("ffprobe")]
 hiddenimports = []
 
-for package in (
+packages = [
     "av",
     "ctranslate2",
     "faster_whisper",
     "huggingface_hub",
+    "pyannote.audio",
     "tokenizers",
     "webview",
-):
+]
+if sys.platform == "win32":
+    packages.append("nvidia.cublas")
+
+for package in packages:
     package_datas, package_binaries, package_imports = collect_all(package)
     datas += package_datas
     binaries += package_binaries
@@ -46,7 +62,7 @@ analysis = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=["torchcodec"],
     noarchive=False,
     optimize=0,
 )
@@ -65,9 +81,14 @@ executable = EXE(
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
-    target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
+    icon=str(icon_path),
+    target_arch=target_arch,
+    codesign_identity=codesign_identity,
+    entitlements_file=(
+        str(entitlements_path)
+        if sys.platform == "darwin" and codesign_identity
+        else None
+    ),
 )
 collected = COLLECT(
     executable,
@@ -83,10 +104,16 @@ if sys.platform == "darwin":
     application = BUNDLE(
         collected,
         name="Subtitle Studio.app",
-        icon=None,
+        icon=str(icon_path),
         bundle_identifier="com.subtitlestudio.desktop",
         info_plist={
+            "CFBundleName": "Subtitle Studio",
             "CFBundleDisplayName": "Subtitle Studio",
+            "CFBundleShortVersionString": app_version,
+            "CFBundleVersion": app_version,
+            "LSApplicationCategoryType": "public.app-category.video",
+            "LSMinimumSystemVersion": "12.0",
             "NSHighResolutionCapable": True,
+            "NSHumanReadableCopyright": "Copyright 2026 Subtitle Studio",
         },
     )

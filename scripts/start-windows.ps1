@@ -100,12 +100,12 @@ try {
         throw "Could not install the backend components."
     }
 
-    & $venvPython -c "import whisper" 2>$null
+    & $venvPython -c "import faster_whisper" 2>$null
     if ($LASTEXITCODE -ne 0) {
-        Write-Step "Installing Whisper speech recognition (first run can take several minutes)"
-        & $venvPython -m pip install --disable-pip-version-check openai-whisper
+        Write-Step "Installing Faster Whisper speech recognition (first run can take several minutes)"
+        & $venvPython -m pip install --disable-pip-version-check "faster-whisper>=1.2,<2"
         if ($LASTEXITCODE -ne 0) {
-            throw "Could not install Whisper."
+            throw "Could not install Faster Whisper."
         }
     }
 

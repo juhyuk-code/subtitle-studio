@@ -15,6 +15,11 @@ dependencies = [
 dev = ["pytest>=8.3,<9"]
 desktop = [
   "faster-whisper>=1.2,<2",
+  "nvidia-cublas-cu12>=12.8,<13; sys_platform == 'win32'",
+  "pyannote.audio>=4,<5; sys_platform != 'darwin' or platform_machine != 'x86_64'",
+  "pyannote.audio>=3.3,<4; sys_platform == 'darwin' and platform_machine == 'x86_64'",
+  "torch==2.2.2; sys_platform == 'darwin' and platform_machine == 'x86_64'",
+  "torchaudio==2.2.2; sys_platform == 'darwin' and platform_machine == 'x86_64'",
   "pyinstaller>=6.15,<7",
   "pywebview>=6.1,<7"
 ]
