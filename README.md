@@ -1,7 +1,18 @@
 # Subtitle Studio
 
-처음 사용한다면 [첫 영상 클립 만들기](QUICK_START_KO.md)를 먼저 읽어보세요.
-전체 기능과 단축키는 [사용자 매뉴얼](USER_MANUAL.md)에 정리되어 있습니다.
+## Download for Mac
+
+### [Download for Apple Silicon](https://github.com/juhyuk-code/subtitle-studio/releases/latest/download/Subtitle-Studio-macOS-arm64.dmg)
+
+### [Download for Intel Mac](https://github.com/juhyuk-code/subtitle-studio/releases/latest/download/Subtitle-Studio-macOS-x86_64.dmg)
+
+**[한국어: 첫 영상 클립 만들기](QUICK_START_KO.md)**
+
+[전체 사용자 매뉴얼](USER_MANUAL.md)
+
+Open the DMG and drag **Subtitle Studio** onto **Applications**. If macOS blocks
+the first launch, Control-click the app in Applications, choose **Open**, then
+confirm **Open** once.
 
 Subtitle Studio is a native Windows and macOS workflow for turning Korean
 podcast footage into reviewed Korean transcripts, natural English captions,
@@ -9,26 +20,11 @@ social post copy, subtitle files, and finished captioned clips.
 
 `media -> speaker detection -> Whisper large-v3 -> Korean correction -> English translation -> captions -> export`
 
-## Download the app
+To check the Mac type, open **Apple menu -> About This Mac**. Download Apple
+Silicon when it shows **Chip**, or Intel when it shows **Processor**.
 
-**[Download the latest Subtitle Studio release](https://github.com/juhyuk-code/subtitle-studio/releases/latest)**
-
-Choose the installer that matches the Mac:
-
-- **Apple Silicon (recommended for Macs from late 2020 onward):**
-  `Subtitle-Studio-macOS-arm64.dmg`
-- **Intel Mac:** `Subtitle-Studio-macOS-x86_64.dmg`
-
-To check, open **Apple menu -> About This Mac**. Download Apple Silicon when it
-shows **Chip**, or Intel when it shows **Processor**.
-
-Open the downloaded DMG, then drag **Subtitle Studio** onto the **Applications**
-shortcut. The published Mac installers are Developer ID signed, notarized by
-Apple, and checked before they appear on the Releases page.
-
-This repository is currently private, so a person must have access to the
-repository and be signed into GitHub to download a release. Making the
-repository public also makes its Releases page publicly downloadable.
+The repository is private, so a person must have repository access and be
+signed into GitHub to download the DMGs.
 
 ## Desktop apps
 
@@ -97,18 +93,19 @@ Mac app lives in `/Applications` or the Windows app is moved elsewhere.
 
 ## Release workflow
 
-Push a version tag such as `v0.1.0` to build and publish a permanent GitHub
-Release with Windows, Apple Silicon, and Intel installers:
+Every successful build on `main` refreshes the permanent latest GitHub Release
+with Windows, Apple Silicon, and Intel installers. A version tag such as
+`v0.1.0` creates a separate versioned Release:
 
 ```sh
 git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The workflow validates bundle metadata, FFmpeg features, code signatures,
-Apple notarization, embedded manuals, a native launch smoke test, and SHA-256
-checksums before the Release becomes downloadable. It refuses to publish an
-unsigned Mac release. See
+The workflow validates bundle metadata, FFmpeg features, embedded manuals, a
+native launch smoke test, and SHA-256 checksums before a Release becomes
+downloadable. When Apple credentials are configured, it additionally signs and
+notarizes the app and DMG. See
 [MACOS_PARITY.md](MACOS_PARITY.md) for the complete acceptance checklist.
 
 Unsigned ad-hoc Mac artifacts can be used for internal testing. For normal

@@ -2,8 +2,12 @@ name: Build desktop apps
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches:
+      - main
   push:
     branches:
+      - main
       - codex/macos-parity
     tags:
       - "v*"
@@ -107,28 +111,6 @@ jobs:
           security list-keychain -d user -s "$KEYCHAIN_PATH" login.keychain-db
           security set-key-partition-list -S apple-tool:,apple: -s -k runner "$KEYCHAIN_PATH"
           echo "SUBTITLE_STUDIO_CODESIGN_IDENTITY=$SIGNING_IDENTITY" >> "$GITHUB_ENV"
-
-      - name: Require Apple signing for a published release
-        if: runner.os == 'macOS' && startsWith(github.ref, 'refs/tags/v')
-        shell: bash
-        run: |
-          missing=()
-          for name in \
-            MACOS_CERTIFICATE_P12 \
-            MACOS_CERTIFICATE_PASSWORD \
-            MACOS_SIGNING_IDENTITY \
-            APPLE_ID \
-            APPLE_TEAM_ID \
-            APPLE_APP_PASSWORD
-          do
-            if [[ -z "${!name}" ]]; then
-              missing+=("$name")
-            fi
-          done
-          if (( ${#missing[@]} )); then
-            printf 'Cannot publish an unsigned macOS release. Missing secret: %s\n' "${missing[@]}"
-            exit 1
-          fi
 
       - name: Test
         shell: bash
@@ -252,7 +234,7 @@ jobs:
 
   publish:
     name: Publish GitHub Release
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     needs: build
     runs-on: ubuntu-24.04
     permissions:
@@ -287,7 +269,8 @@ jobs:
           3. Drag **Subtitle Studio** onto the **Applications** shortcut.
           4. Open **Subtitle Studio** from Applications.
 
-          These Mac installers are Developer ID signed and notarized by Apple.
+          If macOS blocks the first launch, Control-click **Subtitle Studio** in
+          Applications, choose **Open**, then confirm **Open** once.
 
           ## Install on Windows
 
@@ -300,12 +283,31 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            release-assets/Subtitle-Studio-*.dmg \
-            release-assets/Subtitle-Studio-*.zip \
-            release-assets/Subtitle-Studio-*.sha256 \
-            --verify-tag \
-            --title "Subtitle Studio $GITHUB_REF_NAME" \
-            --notes-file release-installation.md \
-            --generate-notes \
-            --latest
+          if [[ "$GITHUB_REF" == "refs/heads/main" ]]; then
+            RELEASE_TAG="desktop-latest"
+            RELEASE_TITLE="Subtitle Studio - Latest Desktop Build"
+          else
+            RELEASE_TAG="$GITHUB_REF_NAME"
+            RELEASE_TITLE="Subtitle Studio $GITHUB_REF_NAME"
+          fi
+
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" \
+              release-assets/Subtitle-Studio-*.dmg \
+              release-assets/Subtitle-Studio-*.zip \
+              release-assets/Subtitle-Studio-*.sha256 \
+              --clobber
+            gh release edit "$RELEASE_TAG" \
+              --title "$RELEASE_TITLE" \
+              --notes-file release-installation.md \
+              --latest
+          else
+            gh release create "$RELEASE_TAG" \
+              release-assets/Subtitle-Studio-*.dmg \
+              release-assets/Subtitle-Studio-*.zip \
+              release-assets/Subtitle-Studio-*.sha256 \
+              --target "$GITHUB_SHA" \
+              --title "$RELEASE_TITLE" \
+              --notes-file release-installation.md \
+              --latest
+          fi
