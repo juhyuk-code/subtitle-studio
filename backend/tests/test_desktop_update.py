@@ -240,7 +240,7 @@ def test_update_status_is_disabled_outside_installed_windows_app(tmp_path: Path)
 
 
 def test_update_script_swaps_builds_and_restores_backup_on_failure(tmp_path: Path):
-    executable = tmp_path / "release" / "Subtitle Studio" / "Subtitle Studio.exe"
+    executable = tmp_path / "release" / "Subtitle Studio" / "Subtitle Studio's.exe"
     paths = desktop_update_paths(executable)
 
     script = build_restart_script(
@@ -252,6 +252,7 @@ def test_update_script_swaps_builds_and_restores_backup_on_failure(tmp_path: Pat
     )
 
     assert "$processId = 123" in script
+    assert "$executableName = 'Subtitle Studio''s.exe'" in script
     assert "Move-Item -LiteralPath $live -Destination $backup" in script
     assert "Move-Item -LiteralPath $staged -Destination $live" in script
     assert "Move-Item -LiteralPath $backup -Destination $live" in script

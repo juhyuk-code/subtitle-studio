@@ -129,7 +129,7 @@ def build_restart_script(
         "$ErrorActionPreference = 'Stop'",
         f"$processId = {process_id}",
         f"$live = {_powershell_literal(paths.live_dir)}",
-        f"$executableName = '{paths.executable.name.replace("'", "''")}'",
+        f"$executableName = {_powershell_text(paths.executable.name)}",
         f"$logPath = {_powershell_literal(log_path)}",
     ]
     if apply_update:
