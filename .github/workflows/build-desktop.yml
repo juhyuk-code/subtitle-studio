@@ -2,19 +2,31 @@ name: Build desktop apps
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - codex/macos-parity
 
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         include:
-          - os: macos-14
-            artifact: Subtitle-Studio-macOS
-            path: release/Subtitle Studio.app
+          - os: macos-15
+            target_arch: arm64
+            artifact: Subtitle-Studio-macOS-Apple-Silicon
+          - os: macos-15-intel
+            target_arch: x86_64
+            artifact: Subtitle-Studio-macOS-Intel
           - os: windows-2022
+            target_arch: x86_64
             artifact: Subtitle-Studio-Windows
-            path: release/Subtitle Studio
     runs-on: ${{ matrix.os }}
+    env:
+      PYINSTALLER_STRICT_BUNDLE_CODESIGN_ERROR: "1"
+      PYINSTALLER_VERIFY_BUNDLE_SIGNATURE: "1"
+      SUBTITLE_STUDIO_TARGET_ARCH: ${{ matrix.target_arch }}
+      SUBTITLE_STUDIO_VERSION: 0.1.0
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -25,25 +37,183 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-      - name: Install FFmpeg on macOS
-        if: runner.os == 'macOS'
-        run: brew install ffmpeg
-      - name: Install FFmpeg on Windows
-        if: runner.os == 'Windows'
-        run: choco install ffmpeg --yes --no-progress
+
       - name: Install dependencies
         shell: bash
         run: |
           python -m venv .venv
           if [[ "$RUNNER_OS" == "Windows" ]]; then
-            .venv/Scripts/python -m pip install -e ".[desktop]"
+            .venv/Scripts/python -m pip install -e ".[dev,desktop]"
           else
-            .venv/bin/python -m pip install -e ".[desktop]"
+            .venv/bin/python -m pip install -e ".[dev,desktop]"
           fi
           npm ci
+
+      - name: Install portable FFmpeg on macOS
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          npm install --no-save --package-lock=false ffmpeg-static @ffprobe-installer/ffprobe
+          FFMPEG_PATH="$(node -p "require('ffmpeg-static')")"
+          FFPROBE_PATH="$(node -p "require('@ffprobe-installer/ffprobe').path")"
+          chmod +x "$FFMPEG_PATH" "$FFPROBE_PATH"
+          echo "SUBTITLE_STUDIO_FFMPEG=$FFMPEG_PATH" >> "$GITHUB_ENV"
+          echo "SUBTITLE_STUDIO_FFPROBE=$FFPROBE_PATH" >> "$GITHUB_ENV"
+          "$FFMPEG_PATH" -hide_banner -filters 2>&1 | grep -E '[[:space:]]subtitles[[:space:]]'
+          "$FFMPEG_PATH" -hide_banner -encoders 2>&1 | grep h264_videotoolbox
+
+      - name: Install FFmpeg on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install ffmpeg --yes --no-progress
+          $ffmpeg = (Get-Command ffmpeg).Source
+          $ffprobe = (Get-Command ffprobe).Source
+          "SUBTITLE_STUDIO_FFMPEG=$ffmpeg" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "SUBTITLE_STUDIO_FFPROBE=$ffprobe" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Import Apple Developer ID certificate
+        if: runner.os == 'macOS' && secrets.MACOS_CERTIFICATE_P12 != '' && secrets.MACOS_SIGNING_IDENTITY != ''
+        shell: bash
+        env:
+          CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+        run: |
+          CERTIFICATE_PATH="$RUNNER_TEMP/subtitle-studio.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/subtitle-studio.keychain-db"
+          printf '%s' "$CERTIFICATE_P12" | base64 --decode > "$CERTIFICATE_PATH"
+          security create-keychain -p runner "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p runner "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" -P "$CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH" login.keychain-db
+          security set-key-partition-list -S apple-tool:,apple: -s -k runner "$KEYCHAIN_PATH"
+          echo "SUBTITLE_STUDIO_CODESIGN_IDENTITY=$SIGNING_IDENTITY" >> "$GITHUB_ENV"
+
+      - name: Test
+        shell: bash
+        run: |
+          npm run test
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            .venv/Scripts/python -m pytest backend/tests
+          else
+            .venv/bin/python -m pytest backend/tests
+          fi
+
       - name: Build
         run: npm run desktop:build
+
+      - name: Verify Windows package
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $app = "release/Subtitle Studio"
+          if (-not (Test-Path "$app/Subtitle Studio.exe")) { throw "Desktop executable is missing" }
+          if (-not (Test-Path "$app/_internal/bin/ffmpeg.exe")) { throw "Bundled FFmpeg is missing" }
+          if (-not (Test-Path "$app/Subtitle Studio Korean Quick Start.md")) { throw "Korean manual is missing" }
+          $selfTest = Start-Process -FilePath "$app/Subtitle Studio.exe" `
+            -ArgumentList "--package-self-test" -Wait -PassThru -WindowStyle Hidden
+          if ($selfTest.ExitCode -ne 0) { throw "Packaged dependency self-test failed" }
+          Compress-Archive -Path "$app/*" -DestinationPath "release/Subtitle-Studio-Windows.zip" -Force
+          Get-FileHash "release/Subtitle-Studio-Windows.zip" -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash.ToLower())  Subtitle-Studio-Windows.zip" } |
+            Set-Content "release/Subtitle-Studio-Windows.zip.sha256"
+
+      - name: Verify and smoke-test macOS app
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          APP="release/Subtitle Studio.app"
+          test -x "$APP/Contents/MacOS/Subtitle Studio"
+          test -x "$APP/Contents/Frameworks/bin/ffmpeg" || test -x "$APP/Contents/Resources/bin/ffmpeg"
+          test -f "$APP/Contents/Resources/docs/QUICK_START_KO.md"
+          test -f "$APP/Contents/Resources/docs/USER_MANUAL.md"
+          test -f "$APP/Contents/Resources/dist/index.html"
+          find "$APP/Contents/Resources/dist/assets" -name '*Pretendard*.woff2' -print -quit | grep .
+          plutil -lint "$APP/Contents/Info.plist"
+          test "$(defaults read "$PWD/$APP/Contents/Info" CFBundleIdentifier)" = "com.subtitlestudio.desktop"
+          test "$(lipo -archs "$APP/Contents/MacOS/Subtitle Studio")" = "${{ matrix.target_arch }}"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          "$APP/Contents/Frameworks/bin/ffmpeg" -hide_banner -filters 2>&1 | grep -E '[[:space:]]subtitles[[:space:]]'
+          "$APP/Contents/Frameworks/bin/ffmpeg" -hide_banner -encoders 2>&1 | grep h264_videotoolbox
+          "$APP/Contents/MacOS/Subtitle Studio" --package-self-test
+          "$APP/Contents/MacOS/Subtitle Studio" > "$RUNNER_TEMP/subtitle-studio-smoke.log" 2>&1 &
+          APP_PID=$!
+          sleep 15
+          if ! kill -0 "$APP_PID"; then
+            cat "$RUNNER_TEMP/subtitle-studio-smoke.log"
+            exit 1
+          fi
+          kill "$APP_PID" || true
+          wait "$APP_PID" || true
+
+      - name: Notarize macOS app
+        if: runner.os == 'macOS' && secrets.MACOS_CERTIFICATE_P12 != '' && secrets.MACOS_SIGNING_IDENTITY != '' && secrets.APPLE_ID != '' && secrets.APPLE_TEAM_ID != '' && secrets.APPLE_APP_PASSWORD != ''
+        shell: bash
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          ditto -c -k --keepParent "release/Subtitle Studio.app" "$RUNNER_TEMP/Subtitle-Studio-notary.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/Subtitle-Studio-notary.zip" \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_PASSWORD" \
+            --wait
+          xcrun stapler staple "release/Subtitle Studio.app"
+          xcrun stapler validate "release/Subtitle Studio.app"
+          spctl --assess --type execute --verbose=2 "release/Subtitle Studio.app"
+
+      - name: Create macOS installers
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          ARCH="${{ matrix.target_arch }}"
+          ditto -c -k --sequesterRsrc --keepParent \
+            "release/Subtitle Studio.app" "release/Subtitle-Studio-macOS-$ARCH.zip"
+          DMG_ROOT="$RUNNER_TEMP/subtitle-studio-dmg"
+          mkdir -p "$DMG_ROOT"
+          ditto "release/Subtitle Studio.app" "$DMG_ROOT/Subtitle Studio.app"
+          cp QUICK_START_KO.md "$DMG_ROOT/Subtitle Studio Korean Quick Start.md"
+          cp USER_MANUAL.md "$DMG_ROOT/Subtitle Studio User Manual.md"
+          ln -s /Applications "$DMG_ROOT/Applications"
+          hdiutil create -volname "Subtitle Studio" -srcfolder "$DMG_ROOT" \
+            -ov -format UDZO "release/Subtitle-Studio-macOS-$ARCH.dmg"
+
+      - name: Sign and notarize macOS disk image
+        if: runner.os == 'macOS' && secrets.MACOS_CERTIFICATE_P12 != '' && secrets.MACOS_SIGNING_IDENTITY != '' && secrets.APPLE_ID != '' && secrets.APPLE_TEAM_ID != '' && secrets.APPLE_APP_PASSWORD != ''
+        shell: bash
+        env:
+          SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          DMG="release/Subtitle-Studio-macOS-${{ matrix.target_arch }}.dmg"
+          codesign --force --timestamp --sign "$SIGNING_IDENTITY" "$DMG"
+          xcrun notarytool submit "$DMG" \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_PASSWORD" \
+            --wait
+          xcrun stapler staple "$DMG"
+          xcrun stapler validate "$DMG"
+          spctl --assess --type open --context context:primary-signature --verbose=2 "$DMG"
+
+      - name: Write macOS checksums
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          cd release
+          shasum -a 256 Subtitle-Studio-macOS-* > "Subtitle-Studio-macOS-${{ matrix.target_arch }}.sha256"
+
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: ${{ matrix.path }}
+          path: |
+            release/Subtitle-Studio-*.zip
+            release/Subtitle-Studio-*.dmg
+            release/Subtitle-Studio-*.sha256
+          if-no-files-found: error

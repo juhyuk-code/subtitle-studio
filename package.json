@@ -9,6 +9,7 @@
     "dev:api": "node scripts/run-python.mjs -m uvicorn backend.app.main:app --reload --port 8000",
     "build": "tsc -b && vite build",
     "desktop:build": "node scripts/build-desktop.mjs",
+    "desktop:update": "node scripts/build-desktop.mjs --stage-update",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:api": "node scripts/run-python.mjs -m pytest backend/tests",

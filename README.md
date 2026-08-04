@@ -1,63 +1,112 @@
 # Subtitle Studio
 
-A locally hosted Korean podcast subtitle workflow with local media processing
-and OpenRouter-powered transcript refinement:
+처음 사용한다면 [첫 영상 클립 만들기](QUICK_START_KO.md)를 먼저 읽어보세요.
+전체 기능과 단축키는 [사용자 매뉴얼](USER_MANUAL.md)에 정리되어 있습니다.
 
-`media → Korean ASR → local correction → episode consistency → conversational English → SRT/VTT`
+Subtitle Studio is a native Windows and macOS workflow for turning Korean
+podcast footage into reviewed Korean transcripts, natural English captions,
+social post copy, subtitle files, and finished captioned clips.
 
-## Standalone apps
+`media -> speaker detection -> Whisper large-v3 -> Korean correction -> English translation -> captions -> export`
 
-Packaged releases include the frontend, API, Python runtime, Faster Whisper,
-FFmpeg, and FFprobe. They open in a native window and do not require Node,
-Python, Homebrew, Winget, a terminal, or a separately running web server.
+## Desktop apps
 
-- macOS: open `release/Subtitle Studio.app`
-- Windows: open `release/Subtitle Studio/Subtitle Studio.exe`
+The packaged app includes the frontend, local API, Python runtime, FFmpeg,
+FFprobe, Faster Whisper, speaker analysis, Pretendard, and both manuals. It does
+not require Node, Python, Homebrew, a terminal, or a separate web server on the
+user's computer.
 
-The selected Whisper model downloads automatically on the first transcription
-and is then cached locally. An internet connection and OpenRouter API key are
-still required for transcript correction and translation. Media normalization
-and Whisper transcription remain on the computer; only transcript text is sent
-to OpenRouter.
+- macOS Apple Silicon: `Subtitle-Studio-macOS-arm64.dmg`
+- macOS Intel: `Subtitle-Studio-macOS-x86_64.dmg`
+- Windows: `Subtitle-Studio-Windows.zip`
 
-Timestamp lists can be pasted into the **Clips** tab using `MM:SS Title` or
-`HH:MM:SS Title`. Each clip ends at the following timestamp, and the final clip
-ends at the media duration. Select any subset before transcription, correction,
-or translation to process only those ranges.
+On macOS, open the DMG and drag **Subtitle Studio** into **Applications**. On
+Windows, extract the ZIP and open `Subtitle Studio.exe`.
 
-### Build a release
+The first transcription downloads Whisper `large-v3` and caches it under the
+current user's application-data folder. Speaker detection similarly downloads
+Pyannote Community-1 after its model terms are accepted and a Hugging Face token
+is added in Settings. Media preparation, transcription, speaker analysis,
+waveforms, voice profiles, caption rendering, and video export stay local. Only
+transcript text is sent to OpenRouter for correction, translation, and post-copy
+generation.
+
+Video export defaults to a 1920x1080 canvas, maximum quality, and GPU encoding.
+macOS uses Apple VideoToolbox; Windows probes NVIDIA NVENC, Intel Quick Sync,
+and AMD AMF. Both platforms retry the full export with CPU libx264 when hardware
+encoding is unavailable or fails.
+
+Projects and settings are stored outside the installed app, so replacing or
+updating the app preserves work. The default export folder is
+`~/Movies/Subtitle Studio Exports` on macOS and
+`~/Videos/Subtitle Studio Exports` on Windows unless the user chooses another
+folder in Settings.
+
+## Build locally
 
 Desktop apps must be built on their target operating system.
 
 ```sh
 npm install
 python3.11 -m venv .venv
-./.venv/bin/pip install -e '.[desktop]'
+./.venv/bin/python -m pip install -e '.[dev,desktop]'
+npm run check
 npm run desktop:build
 ```
 
-The repository also includes a manually triggered GitHub Actions workflow that
-builds downloadable macOS and Windows artifacts.
+Set `SUBTITLE_STUDIO_FFMPEG` and `SUBTITLE_STUDIO_FFPROBE` to portable binaries
+before packaging. A macOS FFmpeg build must include the `subtitles` filter and
+`h264_videotoolbox` encoder. Local outputs are:
+
+- macOS: `release/Subtitle Studio.app`
+- Windows: `release/Subtitle Studio/Subtitle Studio.exe`
+
+To build an update while the installed app is still running:
+
+```sh
+npm run desktop:update
+```
+
+The new build waits in the current user's Subtitle Studio application-data
+folder. In the app, open **Settings** and use **Apply update & restart**. The
+updater replaces only the app bundle or Windows program directory; projects,
+models, API settings, voice profiles, style presets, export folders, font
+scale, sidebar width, and workspaces remain untouched. This works even when the
+Mac app lives in `/Applications` or the Windows app is moved elsewhere.
+
+## Release workflow
+
+Run **Build desktop apps** in GitHub Actions to test and package Windows,
+Apple Silicon, and Intel releases. The macOS jobs validate the bundle metadata,
+FFmpeg features, code signature, embedded manuals, and a native launch smoke
+test before creating ZIP and DMG installers. See
+[MACOS_PARITY.md](MACOS_PARITY.md) for the complete acceptance checklist.
+
+Unsigned ad-hoc Mac artifacts can be used for internal testing. For normal
+distribution through Gatekeeper, configure these repository secrets:
+
+- `MACOS_CERTIFICATE_P12`: base64-encoded Developer ID Application certificate
+- `MACOS_CERTIFICATE_PASSWORD`: certificate export password
+- `MACOS_SIGNING_IDENTITY`: full Developer ID Application identity
+- `APPLE_ID`: Apple developer account email
+- `APPLE_TEAM_ID`: Apple developer team ID
+- `APPLE_APP_PASSWORD`: app-specific password for notarization
+
+When those secrets are present, the workflow signs with hardened runtime,
+submits the app to Apple's notary service, staples the ticket, and validates it
+before creating the installers.
 
 ## Development
-
-Development still uses Node.js 20+, Python 3.11–3.13, and FFmpeg:
 
 ```sh
 npm install
 python3.11 -m venv .venv
-./.venv/bin/pip install -e '.[dev,desktop]'
+./.venv/bin/python -m pip install -e '.[dev,desktop]'
 npm run dev
 ```
 
-On first launch, paste an OpenRouter key into the connection screen. It is
-stored in the local SQLite database and never returned to the frontend.
+Run all frontend, backend, and production-build checks with:
 
-## Verification
-
-```bash
+```sh
 npm run check
 ```
-
-Packaged project data is stored in the operating system's application-data
-folder. Raw ASR text is immutable; corrections and English remain separate.

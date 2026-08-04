@@ -1,7 +1,13 @@
 node_modules/
 dist/
 release/
+release-*/
 .desktop-build/
+.desktop-build-*/
+.desktop-update-build/
+packaging/generated/
+.artifacts/
+tools/
 Subtitle Studio.app/
 .venv/
 data/

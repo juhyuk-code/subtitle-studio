@@ -4,18 +4,38 @@ from pathlib import Path
 from threading import RLock
 from typing import Any
 
-from .models import GlossaryEntry, Job, Project, Segment, TimestampClip
+from .models import (
+    CaptionTrack,
+    DetectedSpeakerTurn,
+    GlossaryEntry,
+    Job,
+    NavigationMarker,
+    PostCopy,
+    Project,
+    ProjectWorkspaceState,
+    Segment,
+    Speaker,
+    SubtitleStylePreset,
+    TimestampClip,
+    VoiceProfileRecord,
+)
 
 
 class Store:
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, video_export_root: Path | None = None):
         self.root = root
         self.root.mkdir(parents=True, exist_ok=True)
         self.media_root = self.root / "projects"
         self.media_root.mkdir(exist_ok=True)
+        self.video_export_root = video_export_root or self.root / "video-exports"
         self.db_path = self.root / "subtitle_studio.sqlite3"
         self.lock = RLock()
         self._initialize()
+
+    def video_export_dir(
+        self, project_id: str, project_name: str
+    ) -> Path:
+        return self.video_export_root
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.db_path, check_same_thread=False)
@@ -84,11 +104,41 @@ class Store:
                 (kind, project_id),
             )
 
+    def delete(self, kind: str, record_id: str) -> None:
+        with self.lock, self._connect() as db:
+            db.execute(
+                "DELETE FROM records WHERE kind = ? AND record_id = ?",
+                (kind, record_id),
+            )
+
     def save_project(self, project: Project) -> None:
         self.put("project", project.project_id, project.project_id, project)
 
+    def save_workspace(
+        self, project_id: str, workspace: ProjectWorkspaceState
+    ) -> None:
+        self.put("workspace", project_id, project_id, workspace)
+
     def save_segment(self, project_id: str, segment: Segment) -> None:
         self.put("segment", project_id, segment.segment_id, segment, segment.start_ms)
+
+    def save_caption_track(
+        self, project_id: str, track: CaptionTrack
+    ) -> None:
+        self.put(
+            "caption_track",
+            project_id,
+            f"{project_id}:{track.language}",
+            track,
+        )
+
+    def save_post_copy(self, project_id: str, post_copy: PostCopy) -> None:
+        self.put(
+            "post_copy",
+            project_id,
+            f"{project_id}:{post_copy.clip_id}",
+            post_copy,
+        )
 
     def save_job(self, job: Job) -> None:
         self.put("job", job.project_id, job.job_id, job)
@@ -99,9 +149,68 @@ class Store:
     def save_clip(self, project_id: str, clip: TimestampClip) -> None:
         self.put("clip", project_id, clip.clip_id, clip, clip.start_ms)
 
+    def save_marker(
+        self, project_id: str, marker: NavigationMarker
+    ) -> None:
+        self.put(
+            "marker",
+            project_id,
+            f"{project_id}:{marker.marker_id}",
+            marker,
+            marker.timestamp_ms,
+        )
+
+    def save_speaker(self, project_id: str, speaker: Speaker) -> None:
+        self.put(
+            "speaker",
+            project_id,
+            f"{project_id}:{speaker.speaker_id}",
+            speaker,
+        )
+
+    def save_speaker_turn(
+        self, project_id: str, turn: DetectedSpeakerTurn
+    ) -> None:
+        self.put(
+            "speaker_turn",
+            project_id,
+            f"{project_id}:{turn.turn_id}",
+            turn,
+            turn.start_ms,
+        )
+
+    def save_voice_profile(self, profile: VoiceProfileRecord) -> None:
+        self.put(
+            "voice_profile",
+            "__app__",
+            profile.profile_id,
+            profile,
+        )
+
+    def delete_voice_profile(self, profile_id: str) -> None:
+        with self.lock, self._connect() as db:
+            db.execute(
+                "DELETE FROM records WHERE kind = ? AND record_id = ?",
+                ("voice_profile", profile_id),
+            )
+
+    def save_style_preset(self, preset: SubtitleStylePreset) -> None:
+        self.put(
+            "style_preset",
+            "__app__",
+            preset.preset_id,
+            preset,
+        )
+
+    def delete_style_preset(self, preset_id: str) -> None:
+        self.delete("style_preset", preset_id)
+
     def save_setting(self, key: str, value: str) -> None:
         self.put("setting", "__app__", key, {"value": value})
 
     def get_setting(self, key: str) -> str | None:
         record = self.get("setting", key)
         return record.get("value") if record else None
+
+    def delete_setting(self, key: str) -> None:
+        self.delete("setting", key)
