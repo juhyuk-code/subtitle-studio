@@ -317,6 +317,7 @@ def test_gpu_detection_falls_through_to_next_available_encoder(
 
     monkeypatch.setattr(services.sys, "platform", "win32")
     monkeypatch.setattr(services.subprocess, "run", probe)
+    monkeypatch.setattr(services, "hidden_subprocess_kwargs", lambda: {})
 
     assert available_gpu_video_encoder("ffmpeg") == (
         "h264_qsv",

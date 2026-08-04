@@ -57,6 +57,7 @@ def test_cuda_dll_directory_is_added_on_windows(monkeypatch, tmp_path):
         services.os,
         "add_dll_directory",
         lambda value: added.append(value) or value,
+        raising=False,
     )
     monkeypatch.setitem(
         sys.modules,
