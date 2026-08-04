@@ -663,7 +663,7 @@ function App() {
               }
               detail={
                 runtime?.diarization_configured
-                  ? "Community-1"
+                  ? runtime.diarization_model.split("/").pop()
                   : "Hugging Face token needed"
               }
             />
@@ -731,6 +731,9 @@ function OpenRouterModal({
   const [huggingfaceToken, setHuggingfaceToken] = useState("");
   const [speakerDetectionConfigured, setSpeakerDetectionConfigured] =
     useState(false);
+  const [speakerDetectionModel, setSpeakerDetectionModel] = useState(
+    "pyannote/speaker-diarization-community-1"
+  );
   const [correctionModel, setCorrectionModel] = useState("");
   const [translationModel, setTranslationModel] = useState("");
   const [postCopyModel, setPostCopyModel] = useState("");
@@ -827,7 +830,10 @@ function OpenRouterModal({
     let mounted = true;
     api.speakerDetectionSettings()
       .then((settings) => {
-        if (mounted) setSpeakerDetectionConfigured(settings.configured);
+        if (mounted) {
+          setSpeakerDetectionConfigured(settings.configured);
+          setSpeakerDetectionModel(settings.model);
+        }
       })
       .catch((reason: Error) => {
         if (mounted) setError(reason.message);
@@ -1102,7 +1108,10 @@ function OpenRouterModal({
         <div className="settings-section">
           <div>
             <strong>Local speaker detection</strong>
-            <small>Pyannote Community-1 separates voices before correction.</small>
+            <small>
+              Pyannote {speakerDetectionModel.split("/").pop()} separates voices
+              before correction.
+            </small>
           </div>
           <label>
             Hugging Face access token
@@ -1121,11 +1130,11 @@ function OpenRouterModal({
             <small>
               First accept the{" "}
               <a
-                href="https://huggingface.co/pyannote/speaker-diarization-community-1"
+                href={`https://huggingface.co/${speakerDetectionModel}`}
                 target="_blank"
                 rel="noreferrer"
               >
-                Community-1 model terms
+                selected model terms
               </a>
               , then create a token at{" "}
               <a

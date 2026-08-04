@@ -42,8 +42,9 @@ Windows, extract the ZIP and open `Subtitle Studio.exe`.
 
 The first transcription downloads Whisper `large-v3` and caches it under the
 current user's application-data folder. Speaker detection similarly downloads
-Pyannote Community-1 after its model terms are accepted and a Hugging Face token
-is added in Settings. Media preparation, transcription, speaker analysis,
+Pyannote Community-1 on Apple Silicon and Windows, or the compatible Pyannote
+3.1 pipeline on Intel Mac, after its model terms are accepted and a Hugging Face
+token is added in Settings. Media preparation, transcription, speaker analysis,
 waveforms, voice profiles, caption rendering, and video export stay local. Only
 transcript text is sent to OpenRouter for correction, translation, and post-copy
 generation.

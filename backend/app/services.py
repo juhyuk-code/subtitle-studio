@@ -5,6 +5,7 @@ import inspect
 import json
 import logging
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -50,7 +51,25 @@ from .store import Store
 
 SUPPORTED_EXTENSIONS = {".mp4", ".mov", ".mkv", ".mp3", ".wav", ".m4a", ".aac"}
 DEFAULT_WHISPER_MODEL = "large-v3"
-DEFAULT_DIARIZATION_MODEL = "pyannote/speaker-diarization-community-1"
+COMMUNITY_DIARIZATION_MODEL = "pyannote/speaker-diarization-community-1"
+INTEL_MAC_DIARIZATION_MODEL = "pyannote/speaker-diarization-3.1"
+
+
+def default_diarization_model(
+    system_name: str | None = None,
+    machine: str | None = None,
+) -> str:
+    configured = os.environ.get("DIARIZATION_MODEL", "").strip()
+    if configured:
+        return configured
+    current_system = system_name or sys.platform
+    current_machine = machine or platform.machine()
+    if current_system == "darwin" and current_machine == "x86_64":
+        return INTEL_MAC_DIARIZATION_MODEL
+    return COMMUNITY_DIARIZATION_MODEL
+
+
+DEFAULT_DIARIZATION_MODEL = default_diarization_model()
 DEFAULT_CORRECTION_MODEL = "google/gemini-3.1-flash-lite"
 DEFAULT_TRANSLATION_MODEL = "anthropic/claude-sonnet-4.6"
 
@@ -895,8 +914,8 @@ def _load_diarization_pipeline(token: str):
             )
         if pipeline is None:
             raise RuntimeError(
-                "Speaker model access was denied. Accept the Community-1 model "
-                "terms on Hugging Face, then check your token."
+                "Speaker model access was denied. Accept the selected Pyannote "
+                "model terms on Hugging Face, then check your token."
             )
         if torch.cuda.is_available():
             pipeline.to(torch.device("cuda"))

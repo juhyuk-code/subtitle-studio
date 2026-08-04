@@ -13,16 +13,30 @@ from backend.app.models import (
     Word,
 )
 from backend.app.services import (
+    COMMUNITY_DIARIZATION_MODEL,
     ClipAudioMapping,
     DiarizationResult,
+    INTEL_MAC_DIARIZATION_MODEL,
     SpeakerTurn,
     align_segments_to_speakers,
+    default_diarization_model,
     match_voice_profiles,
     remap_selected_clip_turns,
     run_diarization,
     run_transcription,
 )
 from backend.app.store import Store
+
+
+def test_diarization_model_uses_intel_compatible_pipeline(monkeypatch):
+    monkeypatch.delenv("DIARIZATION_MODEL", raising=False)
+    assert default_diarization_model("darwin", "x86_64") == INTEL_MAC_DIARIZATION_MODEL
+    assert default_diarization_model("darwin", "arm64") == COMMUNITY_DIARIZATION_MODEL
+
+
+def test_diarization_model_allows_explicit_override(monkeypatch):
+    monkeypatch.setenv("DIARIZATION_MODEL", "example/custom-pipeline")
+    assert default_diarization_model("darwin", "x86_64") == "example/custom-pipeline"
 
 
 def test_word_timestamps_are_split_at_speaker_changes():
