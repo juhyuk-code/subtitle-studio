@@ -27,6 +27,12 @@ jobs:
       PYINSTALLER_VERIFY_BUNDLE_SIGNATURE: "1"
       SUBTITLE_STUDIO_TARGET_ARCH: ${{ matrix.target_arch }}
       SUBTITLE_STUDIO_VERSION: 0.1.0
+      MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+      MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+      MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -73,12 +79,12 @@ jobs:
           "SUBTITLE_STUDIO_FFPROBE=$ffprobe" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Import Apple Developer ID certificate
-        if: runner.os == 'macOS' && secrets.MACOS_CERTIFICATE_P12 != '' && secrets.MACOS_SIGNING_IDENTITY != ''
+        if: runner.os == 'macOS' && env.MACOS_CERTIFICATE_P12 != '' && env.MACOS_SIGNING_IDENTITY != ''
         shell: bash
         env:
-          CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
-          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
-          SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+          CERTIFICATE_P12: ${{ env.MACOS_CERTIFICATE_P12 }}
+          CERTIFICATE_PASSWORD: ${{ env.MACOS_CERTIFICATE_PASSWORD }}
+          SIGNING_IDENTITY: ${{ env.MACOS_SIGNING_IDENTITY }}
         run: |
           CERTIFICATE_PATH="$RUNNER_TEMP/subtitle-studio.p12"
           KEYCHAIN_PATH="$RUNNER_TEMP/subtitle-studio.keychain-db"
@@ -149,12 +155,8 @@ jobs:
           wait "$APP_PID" || true
 
       - name: Notarize macOS app
-        if: runner.os == 'macOS' && secrets.MACOS_CERTIFICATE_P12 != '' && secrets.MACOS_SIGNING_IDENTITY != '' && secrets.APPLE_ID != '' && secrets.APPLE_TEAM_ID != '' && secrets.APPLE_APP_PASSWORD != ''
+        if: runner.os == 'macOS' && env.MACOS_CERTIFICATE_P12 != '' && env.MACOS_SIGNING_IDENTITY != '' && env.APPLE_ID != '' && env.APPLE_TEAM_ID != '' && env.APPLE_APP_PASSWORD != ''
         shell: bash
-        env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
         run: |
           ditto -c -k --keepParent "release/Subtitle Studio.app" "$RUNNER_TEMP/Subtitle-Studio-notary.zip"
           xcrun notarytool submit "$RUNNER_TEMP/Subtitle-Studio-notary.zip" \
@@ -183,13 +185,10 @@ jobs:
             -ov -format UDZO "release/Subtitle-Studio-macOS-$ARCH.dmg"
 
       - name: Sign and notarize macOS disk image
-        if: runner.os == 'macOS' && secrets.MACOS_CERTIFICATE_P12 != '' && secrets.MACOS_SIGNING_IDENTITY != '' && secrets.APPLE_ID != '' && secrets.APPLE_TEAM_ID != '' && secrets.APPLE_APP_PASSWORD != ''
+        if: runner.os == 'macOS' && env.MACOS_CERTIFICATE_P12 != '' && env.MACOS_SIGNING_IDENTITY != '' && env.APPLE_ID != '' && env.APPLE_TEAM_ID != '' && env.APPLE_APP_PASSWORD != ''
         shell: bash
         env:
-          SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          SIGNING_IDENTITY: ${{ env.MACOS_SIGNING_IDENTITY }}
         run: |
           DMG="release/Subtitle-Studio-macOS-${{ matrix.target_arch }}.dmg"
           codesign --force --timestamp --sign "$SIGNING_IDENTITY" "$DMG"
