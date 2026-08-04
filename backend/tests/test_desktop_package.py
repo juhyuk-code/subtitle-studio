@@ -57,3 +57,10 @@ def test_packaged_self_test_is_selected_before_desktop_main():
     desktop_main = source.index("main()", self_test)
 
     assert self_test < desktop_main
+
+
+def test_desktop_package_includes_lightning_fabric_metadata():
+    spec_path = Path(__file__).parents[2] / "packaging" / "subtitle_studio.spec"
+    source = spec_path.read_text(encoding="utf-8")
+
+    assert 'collect_data_files("lightning_fabric")' in source

@@ -3,7 +3,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_all
+from PyInstaller.utils.hooks import collect_all, collect_data_files
 
 
 project_root = Path(SPECPATH).parent
@@ -31,6 +31,7 @@ datas = [
     (str(project_root / "USER_MANUAL.md"), "docs"),
     (str(project_root / "QUICK_START_KO.md"), "docs"),
 ]
+datas += collect_data_files("lightning_fabric")
 binaries = [required_binary("ffmpeg"), required_binary("ffprobe")]
 hiddenimports = []
 
