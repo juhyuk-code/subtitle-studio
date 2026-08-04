@@ -9,6 +9,27 @@ social post copy, subtitle files, and finished captioned clips.
 
 `media -> speaker detection -> Whisper large-v3 -> Korean correction -> English translation -> captions -> export`
 
+## Download the app
+
+**[Download the latest Subtitle Studio release](https://github.com/juhyuk-code/subtitle-studio/releases/latest)**
+
+Choose the installer that matches the Mac:
+
+- **Apple Silicon (recommended for Macs from late 2020 onward):**
+  `Subtitle-Studio-macOS-arm64.dmg`
+- **Intel Mac:** `Subtitle-Studio-macOS-x86_64.dmg`
+
+To check, open **Apple menu -> About This Mac**. Download Apple Silicon when it
+shows **Chip**, or Intel when it shows **Processor**.
+
+Open the downloaded DMG, then drag **Subtitle Studio** onto the **Applications**
+shortcut. The published Mac installers are Developer ID signed, notarized by
+Apple, and checked before they appear on the Releases page.
+
+This repository is currently private, so a person must have access to the
+repository and be signed into GitHub to download a release. Making the
+repository public also makes its Releases page publicly downloadable.
+
 ## Desktop apps
 
 The packaged app includes the frontend, local API, Python runtime, FFmpeg,
@@ -76,10 +97,18 @@ Mac app lives in `/Applications` or the Windows app is moved elsewhere.
 
 ## Release workflow
 
-Run **Build desktop apps** in GitHub Actions to test and package Windows,
-Apple Silicon, and Intel releases. The macOS jobs validate the bundle metadata,
-FFmpeg features, code signature, embedded manuals, and a native launch smoke
-test before creating ZIP and DMG installers. See
+Push a version tag such as `v0.1.0` to build and publish a permanent GitHub
+Release with Windows, Apple Silicon, and Intel installers:
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The workflow validates bundle metadata, FFmpeg features, code signatures,
+Apple notarization, embedded manuals, a native launch smoke test, and SHA-256
+checksums before the Release becomes downloadable. It refuses to publish an
+unsigned Mac release. See
 [MACOS_PARITY.md](MACOS_PARITY.md) for the complete acceptance checklist.
 
 Unsigned ad-hoc Mac artifacts can be used for internal testing. For normal

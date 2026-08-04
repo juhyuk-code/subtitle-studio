@@ -5,6 +5,11 @@ on:
   push:
     branches:
       - codex/macos-parity
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
 
 jobs:
   build:
@@ -35,6 +40,12 @@ jobs:
       APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Use the tag as the app version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: echo "SUBTITLE_STUDIO_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -96,6 +107,28 @@ jobs:
           security list-keychain -d user -s "$KEYCHAIN_PATH" login.keychain-db
           security set-key-partition-list -S apple-tool:,apple: -s -k runner "$KEYCHAIN_PATH"
           echo "SUBTITLE_STUDIO_CODESIGN_IDENTITY=$SIGNING_IDENTITY" >> "$GITHUB_ENV"
+
+      - name: Require Apple signing for a published release
+        if: runner.os == 'macOS' && startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          missing=()
+          for name in \
+            MACOS_CERTIFICATE_P12 \
+            MACOS_CERTIFICATE_PASSWORD \
+            MACOS_SIGNING_IDENTITY \
+            APPLE_ID \
+            APPLE_TEAM_ID \
+            APPLE_APP_PASSWORD
+          do
+            if [[ -z "${!name}" ]]; then
+              missing+=("$name")
+            fi
+          done
+          if (( ${#missing[@]} )); then
+            printf 'Cannot publish an unsigned macOS release. Missing secret: %s\n' "${missing[@]}"
+            exit 1
+          fi
 
       - name: Test
         shell: bash
@@ -216,3 +249,63 @@ jobs:
             release/Subtitle-Studio-*.dmg
             release/Subtitle-Studio-*.sha256
           if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download verified installers
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Verify release files and checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f release-assets/Subtitle-Studio-macOS-arm64.dmg
+          test -f release-assets/Subtitle-Studio-macOS-x86_64.dmg
+          test -f release-assets/Subtitle-Studio-Windows.zip
+          for checksum in release-assets/*.sha256; do
+            (cd release-assets && sha256sum --check "$(basename "$checksum")")
+          done
+
+      - name: Write installation notes
+        shell: bash
+        run: |
+          cat > release-installation.md <<'EOF'
+          ## Install on Mac
+
+          1. Download `Subtitle-Studio-macOS-arm64.dmg` for an Apple Silicon Mac,
+             or `Subtitle-Studio-macOS-x86_64.dmg` for an Intel Mac.
+          2. Open the DMG.
+          3. Drag **Subtitle Studio** onto the **Applications** shortcut.
+          4. Open **Subtitle Studio** from Applications.
+
+          These Mac installers are Developer ID signed and notarized by Apple.
+
+          ## Install on Windows
+
+          Download `Subtitle-Studio-Windows.zip`, extract it, and open
+          `Subtitle Studio.exe`.
+          EOF
+
+      - name: Publish installers
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            release-assets/Subtitle-Studio-*.dmg \
+            release-assets/Subtitle-Studio-*.zip \
+            release-assets/Subtitle-Studio-*.sha256 \
+            --verify-tag \
+            --title "Subtitle Studio $GITHUB_REF_NAME" \
+            --notes-file release-installation.md \
+            --generate-notes \
+            --latest
