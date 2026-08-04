@@ -136,7 +136,8 @@ jobs:
           $selfTest = Start-Process -FilePath "$app/Subtitle Studio.exe" `
             -ArgumentList "--package-self-test" -Wait -PassThru -WindowStyle Hidden
           if ($selfTest.ExitCode -ne 0) { throw "Packaged dependency self-test failed" }
-          tar.exe -a -c -f "release/Subtitle-Studio-Windows.zip" -C release "Subtitle Studio"
+          tar.exe -a --options zip:compression-level=1 -c `
+            -f "release/Subtitle-Studio-Windows.zip" -C release "Subtitle Studio"
           if ($LASTEXITCODE -ne 0) { throw "Windows package archive failed" }
           Get-FileHash "release/Subtitle-Studio-Windows.zip" -Algorithm SHA256 |
             ForEach-Object { "$($_.Hash.ToLower())  Subtitle-Studio-Windows.zip" } |
