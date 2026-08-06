@@ -1,4 +1,4 @@
-name: Build desktop apps
+name: Build Apple Silicon DMG
 
 on:
   workflow_dispatch:
@@ -8,7 +8,6 @@ on:
   push:
     branches:
       - main
-      - codex/macos-parity
     tags:
       - "v*"
 
@@ -17,24 +16,12 @@ permissions:
 
 jobs:
   build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: macos-15
-            target_arch: arm64
-            artifact: Subtitle-Studio-macOS-Apple-Silicon
-          - os: macos-15-intel
-            target_arch: x86_64
-            artifact: Subtitle-Studio-macOS-Intel
-          - os: windows-2022
-            target_arch: x86_64
-            artifact: Subtitle-Studio-Windows
-    runs-on: ${{ matrix.os }}
+    name: Build Apple Silicon DMG
+    runs-on: macos-15
     env:
       PYINSTALLER_STRICT_BUNDLE_CODESIGN_ERROR: "1"
       PYINSTALLER_VERIFY_BUNDLE_SIGNATURE: "1"
-      SUBTITLE_STUDIO_TARGET_ARCH: ${{ matrix.target_arch }}
+      SUBTITLE_STUDIO_TARGET_ARCH: arm64
       SUBTITLE_STUDIO_VERSION: 0.1.0
       MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
       MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
@@ -54,6 +41,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -63,15 +51,10 @@ jobs:
         shell: bash
         run: |
           python -m venv .venv
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            .venv/Scripts/python -m pip install -e ".[dev,desktop]"
-          else
-            .venv/bin/python -m pip install -e ".[dev,desktop]"
-          fi
+          .venv/bin/python -m pip install -e ".[dev,desktop]"
           npm ci
 
-      - name: Install portable FFmpeg on macOS
-        if: runner.os == 'macOS'
+      - name: Install portable FFmpeg
         shell: bash
         run: |
           npm install --no-save --package-lock=false ffmpeg-static @ffprobe-installer/ffprobe
@@ -83,18 +66,8 @@ jobs:
           "$FFMPEG_PATH" -hide_banner -filters 2>&1 | grep -E '[[:space:]]subtitles[[:space:]]'
           "$FFMPEG_PATH" -hide_banner -encoders 2>&1 | grep h264_videotoolbox
 
-      - name: Install FFmpeg on Windows
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          choco install ffmpeg --yes --no-progress
-          $ffmpeg = (Get-Command ffmpeg).Source
-          $ffprobe = (Get-Command ffprobe).Source
-          "SUBTITLE_STUDIO_FFMPEG=$ffmpeg" | Out-File -FilePath $env:GITHUB_ENV -Append
-          "SUBTITLE_STUDIO_FFPROBE=$ffprobe" | Out-File -FilePath $env:GITHUB_ENV -Append
-
       - name: Import Apple Developer ID certificate
-        if: runner.os == 'macOS' && env.MACOS_CERTIFICATE_P12 != '' && env.MACOS_SIGNING_IDENTITY != ''
+        if: env.MACOS_CERTIFICATE_P12 != '' && env.MACOS_SIGNING_IDENTITY != ''
         shell: bash
         env:
           CERTIFICATE_P12: ${{ env.MACOS_CERTIFICATE_P12 }}
@@ -116,35 +89,12 @@ jobs:
         shell: bash
         run: |
           npm run test
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            .venv/Scripts/python -m pytest backend/tests
-          else
-            .venv/bin/python -m pytest backend/tests
-          fi
+          .venv/bin/python -m pytest backend/tests
 
       - name: Build
         run: npm run desktop:build
 
-      - name: Verify Windows package
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $app = "release/Subtitle Studio"
-          if (-not (Test-Path "$app/Subtitle Studio.exe")) { throw "Desktop executable is missing" }
-          if (-not (Test-Path "$app/_internal/bin/ffmpeg.exe")) { throw "Bundled FFmpeg is missing" }
-          if (-not (Test-Path "$app/Subtitle Studio Korean Quick Start.md")) { throw "Korean manual is missing" }
-          $selfTest = Start-Process -FilePath "$app/Subtitle Studio.exe" `
-            -ArgumentList "--package-self-test" -Wait -PassThru -WindowStyle Hidden
-          if ($selfTest.ExitCode -ne 0) { throw "Packaged dependency self-test failed" }
-          tar.exe -a --options zip:compression-level=1 -c `
-            -f "release/Subtitle-Studio-Windows.zip" -C release "Subtitle Studio"
-          if ($LASTEXITCODE -ne 0) { throw "Windows package archive failed" }
-          Get-FileHash "release/Subtitle-Studio-Windows.zip" -Algorithm SHA256 |
-            ForEach-Object { "$($_.Hash.ToLower())  Subtitle-Studio-Windows.zip" } |
-            Set-Content "release/Subtitle-Studio-Windows.zip.sha256"
-
-      - name: Verify and smoke-test macOS app
-        if: runner.os == 'macOS'
+      - name: Verify and smoke-test app
         shell: bash
         run: |
           APP="release/Subtitle Studio.app"
@@ -156,7 +106,7 @@ jobs:
           find "$APP/Contents/Resources/dist/assets" -name '*Pretendard*.woff2' -print -quit | grep .
           plutil -lint "$APP/Contents/Info.plist"
           test "$(defaults read "$PWD/$APP/Contents/Info" CFBundleIdentifier)" = "com.subtitlestudio.desktop"
-          test "$(lipo -archs "$APP/Contents/MacOS/Subtitle Studio")" = "${{ matrix.target_arch }}"
+          test "$(lipo -archs "$APP/Contents/MacOS/Subtitle Studio")" = "arm64"
           codesign --verify --deep --strict --verbose=2 "$APP"
           "$APP/Contents/Frameworks/bin/ffmpeg" -hide_banner -filters 2>&1 | grep -E '[[:space:]]subtitles[[:space:]]'
           "$APP/Contents/Frameworks/bin/ffmpeg" -hide_banner -encoders 2>&1 | grep h264_videotoolbox
@@ -171,8 +121,8 @@ jobs:
           kill "$APP_PID" || true
           wait "$APP_PID" || true
 
-      - name: Notarize macOS app
-        if: runner.os == 'macOS' && env.MACOS_CERTIFICATE_P12 != '' && env.MACOS_SIGNING_IDENTITY != '' && env.APPLE_ID != '' && env.APPLE_TEAM_ID != '' && env.APPLE_APP_PASSWORD != ''
+      - name: Notarize app
+        if: env.MACOS_CERTIFICATE_P12 != '' && env.MACOS_SIGNING_IDENTITY != '' && env.APPLE_ID != '' && env.APPLE_TEAM_ID != '' && env.APPLE_APP_PASSWORD != ''
         shell: bash
         run: |
           ditto -c -k --keepParent "release/Subtitle Studio.app" "$RUNNER_TEMP/Subtitle-Studio-notary.zip"
@@ -185,13 +135,9 @@ jobs:
           xcrun stapler validate "release/Subtitle Studio.app"
           spctl --assess --type execute --verbose=2 "release/Subtitle Studio.app"
 
-      - name: Create macOS installers
-        if: runner.os == 'macOS'
+      - name: Create drag-and-drop DMG
         shell: bash
         run: |
-          ARCH="${{ matrix.target_arch }}"
-          ditto -c -k --sequesterRsrc --keepParent \
-            "release/Subtitle Studio.app" "release/Subtitle-Studio-macOS-$ARCH.zip"
           DMG_ROOT="$RUNNER_TEMP/subtitle-studio-dmg"
           mkdir -p "$DMG_ROOT"
           ditto "release/Subtitle Studio.app" "$DMG_ROOT/Subtitle Studio.app"
@@ -199,15 +145,15 @@ jobs:
           cp USER_MANUAL.md "$DMG_ROOT/Subtitle Studio User Manual.md"
           ln -s /Applications "$DMG_ROOT/Applications"
           hdiutil create -volname "Subtitle Studio" -srcfolder "$DMG_ROOT" \
-            -ov -format UDZO "release/Subtitle-Studio-macOS-$ARCH.dmg"
+            -ov -format UDZO "release/Subtitle-Studio-macOS-arm64.dmg"
 
-      - name: Sign and notarize macOS disk image
-        if: runner.os == 'macOS' && env.MACOS_CERTIFICATE_P12 != '' && env.MACOS_SIGNING_IDENTITY != '' && env.APPLE_ID != '' && env.APPLE_TEAM_ID != '' && env.APPLE_APP_PASSWORD != ''
+      - name: Sign and notarize DMG
+        if: env.MACOS_CERTIFICATE_P12 != '' && env.MACOS_SIGNING_IDENTITY != '' && env.APPLE_ID != '' && env.APPLE_TEAM_ID != '' && env.APPLE_APP_PASSWORD != ''
         shell: bash
         env:
           SIGNING_IDENTITY: ${{ env.MACOS_SIGNING_IDENTITY }}
         run: |
-          DMG="release/Subtitle-Studio-macOS-${{ matrix.target_arch }}.dmg"
+          DMG="release/Subtitle-Studio-macOS-arm64.dmg"
           codesign --force --timestamp --sign "$SIGNING_IDENTITY" "$DMG"
           xcrun notarytool submit "$DMG" \
             --apple-id "$APPLE_ID" \
@@ -218,76 +164,66 @@ jobs:
           xcrun stapler validate "$DMG"
           spctl --assess --type open --context context:primary-signature --verbose=2 "$DMG"
 
-      - name: Write macOS checksums
-        if: runner.os == 'macOS'
+      - name: Write checksum
         shell: bash
         run: |
           cd release
-          shasum -a 256 Subtitle-Studio-macOS-* > "Subtitle-Studio-macOS-${{ matrix.target_arch }}.sha256"
+          shasum -a 256 Subtitle-Studio-macOS-arm64.dmg > Subtitle-Studio-macOS-arm64.sha256
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
+          name: Subtitle-Studio-macOS-Apple-Silicon
           path: |
-            release/Subtitle-Studio-*.zip
-            release/Subtitle-Studio-*.dmg
-            release/Subtitle-Studio-*.sha256
+            release/Subtitle-Studio-macOS-arm64.dmg
+            release/Subtitle-Studio-macOS-arm64.sha256
+          compression-level: 0
           if-no-files-found: error
 
   publish:
-    name: Publish GitHub Release
+    name: Publish Apple Silicon DMG
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     needs: build
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
-      - name: Download verified installers
+      - name: Download verified installer
         uses: actions/download-artifact@v4
         with:
+          name: Subtitle-Studio-macOS-Apple-Silicon
           path: release-assets
-          merge-multiple: true
 
-      - name: Verify release files and checksums
+      - name: Verify installer and checksum
         shell: bash
         run: |
           set -euo pipefail
           test -f release-assets/Subtitle-Studio-macOS-arm64.dmg
-          test -f release-assets/Subtitle-Studio-macOS-x86_64.dmg
-          test -f release-assets/Subtitle-Studio-Windows.zip
-          for checksum in release-assets/*.sha256; do
-            (cd release-assets && sha256sum --check "$(basename "$checksum")")
-          done
+          test -f release-assets/Subtitle-Studio-macOS-arm64.sha256
+          (cd release-assets && sha256sum --check Subtitle-Studio-macOS-arm64.sha256)
 
       - name: Write installation notes
         shell: bash
         run: |
           cat > release-installation.md <<'EOF'
-          ## Install on Mac
+          ## Install on Apple Silicon Mac
 
-          1. Download `Subtitle-Studio-macOS-arm64.dmg` for an Apple Silicon Mac,
-             or `Subtitle-Studio-macOS-x86_64.dmg` for an Intel Mac.
+          1. Download `Subtitle-Studio-macOS-arm64.dmg`.
           2. Open the DMG.
           3. Drag **Subtitle Studio** onto the **Applications** shortcut.
           4. Open **Subtitle Studio** from Applications.
 
           If macOS blocks the first launch, Control-click **Subtitle Studio** in
           Applications, choose **Open**, then confirm **Open** once.
-
-          ## Install on Windows
-
-          Download `Subtitle-Studio-Windows.zip`, extract it, and open
-          `Subtitle Studio.exe`.
           EOF
 
-      - name: Publish installers
+      - name: Publish installer
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           if [[ "$GITHUB_REF" == "refs/heads/main" ]]; then
             RELEASE_TAG="desktop-latest"
-            RELEASE_TITLE="Subtitle Studio - Latest Desktop Build"
+            RELEASE_TITLE="Subtitle Studio for Apple Silicon"
           else
             RELEASE_TAG="$GITHUB_REF_NAME"
             RELEASE_TITLE="Subtitle Studio $GITHUB_REF_NAME"
@@ -295,9 +231,8 @@ jobs:
 
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release upload "$RELEASE_TAG" \
-              release-assets/Subtitle-Studio-*.dmg \
-              release-assets/Subtitle-Studio-*.zip \
-              release-assets/Subtitle-Studio-*.sha256 \
+              release-assets/Subtitle-Studio-macOS-arm64.dmg \
+              release-assets/Subtitle-Studio-macOS-arm64.sha256 \
               --clobber
             gh release edit "$RELEASE_TAG" \
               --title "$RELEASE_TITLE" \
@@ -305,9 +240,8 @@ jobs:
               --latest
           else
             gh release create "$RELEASE_TAG" \
-              release-assets/Subtitle-Studio-*.dmg \
-              release-assets/Subtitle-Studio-*.zip \
-              release-assets/Subtitle-Studio-*.sha256 \
+              release-assets/Subtitle-Studio-macOS-arm64.dmg \
+              release-assets/Subtitle-Studio-macOS-arm64.sha256 \
               --target "$GITHUB_SHA" \
               --title "$RELEASE_TITLE" \
               --notes-file release-installation.md \

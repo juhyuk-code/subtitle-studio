@@ -1,10 +1,8 @@
 # Subtitle Studio
 
-## Download for Mac
+## Download for Apple Silicon Mac
 
-### [Download for Apple Silicon](https://github.com/juhyuk-code/subtitle-studio/releases/latest/download/Subtitle-Studio-macOS-arm64.dmg)
-
-### [Download for Intel Mac](https://github.com/juhyuk-code/subtitle-studio/releases/latest/download/Subtitle-Studio-macOS-x86_64.dmg)
+### [Download Subtitle Studio DMG](https://github.com/juhyuk-code/subtitle-studio/releases/latest/download/Subtitle-Studio-macOS-arm64.dmg)
 
 **[한국어: 첫 영상 클립 만들기](QUICK_START_KO.md)**
 
@@ -20,11 +18,8 @@ social post copy, subtitle files, and finished captioned clips.
 
 `media -> speaker detection -> Whisper large-v3 -> Korean correction -> English translation -> captions -> export`
 
-To check the Mac type, open **Apple menu -> About This Mac**. Download Apple
-Silicon when it shows **Chip**, or Intel when it shows **Processor**.
-
 The repository is private, so a person must have repository access and be
-signed into GitHub to download the DMGs.
+signed into GitHub to download the DMG.
 
 ## Desktop apps
 
@@ -33,18 +28,14 @@ FFprobe, Faster Whisper, speaker analysis, Pretendard, and both manuals. It does
 not require Node, Python, Homebrew, a terminal, or a separate web server on the
 user's computer.
 
-- macOS Apple Silicon: `Subtitle-Studio-macOS-arm64.dmg`
-- macOS Intel: `Subtitle-Studio-macOS-x86_64.dmg`
-- Windows: `Subtitle-Studio-Windows.zip`
+- Apple Silicon Mac: `Subtitle-Studio-macOS-arm64.dmg`
 
-On macOS, open the DMG and drag **Subtitle Studio** into **Applications**. On
-Windows, extract the ZIP and open `Subtitle Studio.exe`.
+Open the DMG and drag **Subtitle Studio** into **Applications**.
 
 The first transcription downloads Whisper `large-v3` and caches it under the
 current user's application-data folder. Speaker detection similarly downloads
-Pyannote Community-1 on Apple Silicon and Windows, or the compatible Pyannote
-3.1 pipeline on Intel Mac, after its model terms are accepted and a Hugging Face
-token is added in Settings. Media preparation, transcription, speaker analysis,
+Pyannote Community-1 after its model terms are accepted and a Hugging Face token
+is added in Settings. Media preparation, transcription, speaker analysis,
 waveforms, voice profiles, caption rendering, and video export stay local. Only
 transcript text is sent to OpenRouter for correction, translation, and post-copy
 generation.
@@ -95,7 +86,7 @@ Mac app lives in `/Applications` or the Windows app is moved elsewhere.
 ## Release workflow
 
 Every successful build on `main` refreshes the permanent latest GitHub Release
-with Windows, Apple Silicon, and Intel installers. A version tag such as
+with the Apple Silicon DMG. A version tag such as
 `v0.1.0` creates a separate versioned Release:
 
 ```sh
