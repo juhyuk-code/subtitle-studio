@@ -18,8 +18,7 @@ social post copy, subtitle files, and finished captioned clips.
 
 `media -> speaker detection -> Whisper large-v3 -> Korean correction -> English translation -> captions -> export`
 
-The repository is private, so a person must have repository access and be
-signed into GitHub to download the DMG.
+The DMG is published through the repository's latest GitHub Release.
 
 ## Desktop apps
 
