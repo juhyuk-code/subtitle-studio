@@ -15,6 +15,7 @@ import {
   GearSixIcon,
   LockKeyIcon,
   MagnifyingGlassIcon,
+  PaperPlaneTiltIcon,
   PauseIcon,
   PlayIcon,
   PlusIcon,
@@ -40,6 +41,7 @@ import {
   useState
 } from "react";
 import { api } from "./api";
+import { ScheduledPostsPanel } from "./ScheduledPosts";
 import {
   containedMediaBounds,
   subtitlePreviewScale
@@ -392,6 +394,7 @@ function App() {
   const [runtime, setRuntime] = useState<RuntimeStatus | null>(null);
   const [creating, setCreating] = useState(false);
   const [connecting, setConnecting] = useState(false);
+  const [showScheduled, setShowScheduled] = useState(false);
   const [settingsRevision, setSettingsRevision] = useState(0);
   const [appFontScale, setAppFontScale] = useState(1);
   const [savedSidebarWidth, setSavedSidebarWidth] = useState(245);
@@ -577,6 +580,13 @@ function App() {
         <div className="home-nav-actions">
           <button
             className="connection-button"
+            onClick={() => setShowScheduled(true)}
+          >
+            <PaperPlaneTiltIcon size={15} weight="bold" />
+            Scheduled posts
+          </button>
+          <button
+            className="connection-button"
             onClick={() => setConnecting(true)}
           >
             <span className={runtime?.openrouter_configured ? "connection-dot ready" : "connection-dot"} />
@@ -676,6 +686,12 @@ function App() {
           <p>Correction and translation send transcript text to OpenRouter.</p>
         </aside>
       </main>
+
+      {showScheduled ? (
+        <div className="sched-overlay">
+          <ScheduledPostsPanel onClose={() => setShowScheduled(false)} />
+        </div>
+      ) : null}
 
       {creating ? (
         <NewProjectModal

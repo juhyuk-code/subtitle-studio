@@ -255,3 +255,56 @@ export interface OpenRouterModel {
   completion_price: string;
   request_price: string;
 }
+
+export type XPostMethod = "api" | "browser";
+
+export interface XAccountSettingsStatus {
+  method: XPostMethod;
+  configured: boolean;
+}
+
+export interface XAccountSettingsUpdate {
+  method?: XPostMethod;
+  api_key?: string;
+  api_secret?: string;
+  access_token?: string;
+  access_secret?: string;
+}
+
+export type ScheduledPostStatus =
+  | "pending"
+  | "posting"
+  | "posted"
+  | "failed"
+  | "cancelled";
+
+export interface ScheduledPost {
+  post_id: string;
+  project_id: string;
+  clip_id: string | null;
+  text: string;
+  scheduled_at: string;
+  video_path: string | null;
+  method: XPostMethod;
+  status: ScheduledPostStatus;
+  created_at: string;
+  posted_at: string | null;
+  result_url: string | null;
+  error: string | null;
+  attempts: number;
+}
+
+export interface ScheduledPostCreate {
+  project_id: string;
+  clip_id?: string | null;
+  text: string;
+  scheduled_at: string;
+  video_path?: string | null;
+  method?: XPostMethod;
+}
+
+export interface ScheduledPostPatch {
+  text?: string;
+  scheduled_at?: string;
+  status?: ScheduledPostStatus;
+}
