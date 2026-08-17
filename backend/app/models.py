@@ -543,7 +543,8 @@ class XAccountSettingsStatus(BaseModel):
 class ScheduledPostCreate(BaseModel):
     project_id: str = Field(min_length=1, max_length=80)
     clip_id: str | None = Field(default=None, max_length=80)
-    text: str = Field(min_length=1, max_length=4000)
+    # X Premium allows posts up to 25,000 characters.
+    text: str = Field(min_length=1, max_length=25_000)
     # ISO-8601 datetime; must be in the future when scheduled.
     scheduled_at: str = Field(min_length=1, max_length=40)
     video_path: str | None = Field(default=None, max_length=2048)
@@ -551,7 +552,7 @@ class ScheduledPostCreate(BaseModel):
 
 
 class ScheduledPostPatch(BaseModel):
-    text: str | None = Field(default=None, max_length=4000)
+    text: str | None = Field(default=None, max_length=25_000)
     scheduled_at: str | None = Field(default=None, max_length=40)
     status: ScheduledPostStatus | None = None
 
