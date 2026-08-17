@@ -465,3 +465,111 @@ class OpenRouterModel(BaseModel):
     prompt_price: str
     completion_price: str
     request_price: str
+
+
+# --- Agent clip-from-timestamps orchestration -----------------------------
+
+
+class AgentClipSpec(BaseModel):
+    """One clip to cut, expressed as start/end timestamps."""
+
+    start_ms: int = Field(ge=0)
+    end_ms: int = Field(gt=0)
+    title: str | None = Field(default=None, max_length=200)
+    post_text: str | None = Field(default=None, max_length=4000)
+
+    @field_validator("start_ms", "end_ms", mode="before")
+    @classmethod
+    def round_boundaries(cls, value):
+        return _round_milliseconds(value)
+
+
+class AgentClipRequest(BaseModel):
+    """Drive a full video -> clips -> (optional) scheduled posts run."""
+
+    project_name: str = Field(min_length=1, max_length=120)
+    clips: list[AgentClipSpec] = Field(min_length=1, max_length=200)
+    resolution: Literal["1080p", "source"] = "1080p"
+    quality: Literal["high", "maximum"] = "maximum"
+    encoder: Literal["gpu", "cpu"] = "gpu"
+    generate_post_copy: bool = True
+
+
+class AgentClipResult(BaseModel):
+    clip_id: str
+    title: str
+    start_ms: int
+    end_ms: int
+    output_name: str | None = None
+    output_url: str | None = None
+    output_path: str | None = None
+    scheduled_post_id: str | None = None
+
+
+# --- X (Twitter) posting + scheduling -------------------------------------
+
+# Pluggable posting backends. "api" uses the official X API; "browser" drives a
+# logged-in web session. Both are wired up later behind PosterRegistry.
+PostMethod = Literal["api", "browser"]
+
+ScheduledPostStatus = Literal[
+    "pending", "posting", "posted", "failed", "cancelled"
+]
+
+
+class XAccountSettings(BaseModel):
+    """Credentials/connection state for posting. Stored server-side only."""
+
+    method: PostMethod = "api"
+    api_key: SecretStr | None = None
+    api_secret: SecretStr | None = None
+    access_token: SecretStr | None = None
+    access_secret: SecretStr | None = None
+
+
+class XAccountSettingsUpdate(BaseModel):
+    method: PostMethod | None = None
+    api_key: SecretStr | None = None
+    api_secret: SecretStr | None = None
+    access_token: SecretStr | None = None
+    access_secret: SecretStr | None = None
+
+
+class XAccountSettingsStatus(BaseModel):
+    method: PostMethod
+    configured: bool
+
+
+class ScheduledPostCreate(BaseModel):
+    project_id: str = Field(min_length=1, max_length=80)
+    clip_id: str | None = Field(default=None, max_length=80)
+    # X Premium allows posts up to 25,000 characters.
+    text: str = Field(min_length=1, max_length=25_000)
+    # ISO-8601 datetime; must be in the future when scheduled.
+    scheduled_at: str = Field(min_length=1, max_length=40)
+    video_path: str | None = Field(default=None, max_length=2048)
+    method: PostMethod | None = None
+
+
+class ScheduledPostPatch(BaseModel):
+    text: str | None = Field(default=None, max_length=25_000)
+    scheduled_at: str | None = Field(default=None, max_length=40)
+    status: ScheduledPostStatus | None = None
+
+
+class ScheduledPost(BaseModel):
+    post_id: str = Field(default_factory=lambda: f"post_{uuid4().hex[:12]}")
+    project_id: str
+    clip_id: str | None = None
+    text: str
+    scheduled_at: str
+    video_path: str | None = None
+    method: PostMethod = "api"
+    status: ScheduledPostStatus = "pending"
+    created_at: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+    posted_at: str | None = None
+    result_url: str | None = None
+    error: str | None = None
+    attempts: int = 0

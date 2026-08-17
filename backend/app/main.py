@@ -23,6 +23,9 @@ from dotenv import load_dotenv
 
 from .clips import parse_timestamp_markers
 from .desktop_paths import bundled_binary, open_folder, user_data_root
+from . import xpost
+from . import xapi
+from .agent_pipeline import clip_from_timestamps, clip_everything
 from .models import (
     AppPreferences,
     AppPreferencesPatch,
@@ -61,6 +64,14 @@ from .models import (
     VideoExportRequest,
     VoiceProfile,
     VoiceProfileRecord,
+    AgentClipRequest,
+    AgentClipResult,
+    ScheduledPost,
+    ScheduledPostCreate,
+    ScheduledPostPatch,
+    XAccountSettings,
+    XAccountSettingsStatus,
+    XAccountSettingsUpdate,
 )
 from .services import (
     DEFAULT_DIARIZATION_MODEL,
@@ -126,6 +137,36 @@ def job_is_active(item: dict | Job) -> bool:
     ):
         return True
     return data.get("stage") in ACTIVE_JOB_STAGES
+
+
+def _resolve_clip_video_path(
+    store: "Store", project_id: str, clip_id: str | None
+) -> str | None:
+    """Find the exported MP4 for a clip so a scheduled post can attach it.
+
+    Scans the project's completed export jobs (newest first) for the matching
+    video output and returns its absolute on-disk path, or None when the clip
+    has not been exported yet.
+    """
+    for item in reversed(store.list("job", project_id)):
+        job = Job.model_validate(item)
+        if job.stage != "video_exported":
+            continue
+        candidates = job.outputs
+        if clip_id:
+            candidates = [o for o in candidates if o.clip_id == clip_id]
+        for output in candidates:
+            if output.kind != "video":
+                continue
+            base = (
+                Path(job.output_folder)
+                if job.output_folder
+                else store.video_export_root
+            )
+            path = base / output.output_name
+            if path.is_file():
+                return str(path)
+    return None
 
 
 PRETENDARD_DEFAULT_MIGRATION = "pretendard_default_migration_v1"
@@ -2145,6 +2186,226 @@ def create_app(
             if token:
                 store.save_setting("HUGGINGFACE_TOKEN", token)
         return speaker_detection_status()
+
+    # --- Agent orchestration + X scheduling -------------------------------
+
+    @app.post(
+        "/api/agent/clip-from-timestamps",
+        response_model=dict,
+    )
+    async def agent_clip_from_timestamps(
+        background: BackgroundTasks,
+        media: UploadFile = File(...),
+        payload: str = Form(...),
+    ):
+        """One-shot: upload a video + JSON clip spec, get captioned clips back.
+
+        `payload` is a JSON string matching AgentClipRequest. The heavy work
+        runs as a background task; the response carries a job_id to poll via
+        GET /api/agent/jobs/{job_id}.
+        """
+        try:
+            request = AgentClipRequest.model_validate_json(payload)
+        except Exception as exc:
+            raise HTTPException(422, f"Invalid payload: {exc}") from exc
+
+        suffix = Path(media.filename or "video.mp4").suffix or ".mp4"
+        temp_dir = root / ".agent-uploads"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        temp_path = temp_dir / f"{uuid4().hex}{suffix}"
+        temp_path.write_bytes(await media.read())
+
+        job = new_job("agent", "agent_clip_from_timestamps")
+        store.save_job(job)
+
+        async def _run():
+            try:
+                project, results = await clip_from_timestamps(
+                    store, temp_path, request
+                )
+                finished = Job.model_validate(store.get("job", job.job_id))
+                finished.stage = "agent_completed"
+                finished.progress = 1
+                finished.outputs = []
+                finished.error = None
+                store.save_job(finished)
+                store.put(
+                    "agent_result",
+                    "agent",
+                    job.job_id,
+                    {
+                        "project_id": project.project_id,
+                        "results": [r.model_dump() for r in results],
+                    },
+                )
+            except Exception as exc:  # noqa: BLE001
+                failed = Job.model_validate(store.get("job", job.job_id))
+                failed.stage = "failed"
+                failed.error = str(exc)
+                store.save_job(failed)
+            finally:
+                temp_path.unlink(missing_ok=True)
+
+        background.add_task(_run)
+        return {"job_id": job.job_id, "status": "started"}
+
+    @app.get("/api/agent/jobs/{job_id}", response_model=dict)
+    def agent_job_status(job_id: str):
+        data = store.get("job", job_id)
+        if not data:
+            raise HTTPException(404, "Job not found")
+        job = Job.model_validate(data)
+        result = store.get("agent_result", job_id)
+        return {
+            "job_id": job.job_id,
+            "stage": job.stage,
+            "progress": job.progress,
+            "error": job.error,
+            "result": result,
+        }
+
+    @app.post(
+        "/api/agent/projects/{project_id}/clip-everything",
+        response_model=dict,
+    )
+    async def agent_clip_everything(
+        project_id: str,
+        background: BackgroundTasks,
+    ):
+        """Clip every timestamp in an existing project in one shot.
+
+        Runs the full pipeline (diarize -> transcribe -> correct -> translate),
+        regenerates the burn-in captions, and exports every clip. Poll
+        GET /api/agent/jobs/{job_id} for completion.
+        """
+        if not store.get("project", project_id):
+            raise HTTPException(404, "Project not found")
+        if any(
+            job_is_active(item)
+            for item in store.list("job", project_id)
+        ):
+            raise HTTPException(409, "Another task is already running")
+
+        job = new_job(project_id, "agent_clip_everything")
+        store.save_job(job)
+
+        async def _run():
+            try:
+                project, results = await clip_everything(store, project_id)
+                finished = Job.model_validate(store.get("job", job.job_id))
+                finished.stage = "agent_completed"
+                finished.progress = 1
+                finished.error = None
+                store.save_job(finished)
+                store.put(
+                    "agent_result",
+                    "agent",
+                    job.job_id,
+                    {
+                        "project_id": project.project_id,
+                        "results": [r.model_dump() for r in results],
+                    },
+                )
+            except Exception as exc:  # noqa: BLE001
+                failed = Job.model_validate(store.get("job", job.job_id))
+                failed.stage = "failed"
+                failed.error = str(exc)
+                store.save_job(failed)
+
+        background.add_task(_run)
+        return {"job_id": job.job_id, "status": "started"}
+
+    # --- X account settings ------------------------------------------------
+
+    @app.get("/api/settings/x", response_model=XAccountSettingsStatus)
+    def x_settings_status():
+        settings = xpost.load_account_settings(store)
+        return XAccountSettingsStatus(
+            method=settings.method,
+            configured=xpost.account_is_configured(settings),
+        )
+
+    @app.put("/api/settings/x", response_model=XAccountSettingsStatus)
+    def update_x_settings(update: XAccountSettingsUpdate):
+        settings = xpost.load_account_settings(store)
+        data = update.model_dump(exclude_unset=True)
+        for key, value in data.items():
+            setattr(settings, key, value)
+        xpost.save_account_settings(store, settings)
+        return XAccountSettingsStatus(
+            method=settings.method,
+            configured=xpost.account_is_configured(settings),
+        )
+
+    # --- Scheduled posts ----------------------------------------------------
+
+    @app.get("/api/scheduled-posts", response_model=list[ScheduledPost])
+    def list_posts(project_id: str | None = None, status: str | None = None):
+        return xpost.list_scheduled_posts(store, project_id or "*", status)
+
+    @app.post(
+        "/api/scheduled-posts",
+        response_model=ScheduledPost,
+        status_code=201,
+    )
+    def create_post(request: ScheduledPostCreate):
+        settings = xpost.load_account_settings(store)
+        post = ScheduledPost(
+            project_id=request.project_id,
+            clip_id=request.clip_id,
+            text=request.text,
+            scheduled_at=request.scheduled_at,
+            video_path=request.video_path or _resolve_clip_video_path(
+                store, request.project_id, request.clip_id
+            ),
+            method=request.method or settings.method,
+        )
+        xpost.save_scheduled_post(store, post)
+        return post
+
+    @app.get("/api/scheduled-posts/{post_id}", response_model=ScheduledPost)
+    def get_post(post_id: str):
+        post = xpost.get_scheduled_post(store, post_id)
+        if not post:
+            raise HTTPException(404, "Scheduled post not found")
+        return post
+
+    @app.patch("/api/scheduled-posts/{post_id}", response_model=ScheduledPost)
+    def update_post(post_id: str, patch: ScheduledPostPatch):
+        post = xpost.get_scheduled_post(store, post_id)
+        if not post:
+            raise HTTPException(404, "Scheduled post not found")
+        if post.status == "posted":
+            raise HTTPException(409, "Cannot edit a post that is already posted")
+        updates = patch.model_dump(exclude_unset=True)
+        post = post.model_copy(update=updates)
+        xpost.save_scheduled_post(store, post)
+        return post
+
+    @app.delete("/api/scheduled-posts/{post_id}", status_code=204)
+    def delete_post(post_id: str):
+        post = xpost.get_scheduled_post(store, post_id)
+        if not post:
+            raise HTTPException(404, "Scheduled post not found")
+        if post.status == "posted":
+            raise HTTPException(409, "Cannot delete a post that is already posted")
+        xpost.delete_scheduled_post(store, post_id)
+
+    @app.post("/api/scheduled-posts/{post_id}/cancel", response_model=ScheduledPost)
+    def cancel_post(post_id: str):
+        post = xpost.get_scheduled_post(store, post_id)
+        if not post:
+            raise HTTPException(404, "Scheduled post not found")
+        post.status = "cancelled"
+        xpost.save_scheduled_post(store, post)
+        return post
+
+    @app.post("/api/scheduled-posts/publish-due", response_model=dict)
+    def publish_due_now():
+        return {"posted": xpost.publish_due_posts(store)}
+
+    xpost.register_poster("api", xapi.post_to_x)
+    xpost.start_scheduler(store)
 
     if static_root and static_root.is_dir():
         app.mount("/", StaticFiles(directory=static_root, html=True), name="desktop")

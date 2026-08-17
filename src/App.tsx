@@ -15,6 +15,7 @@ import {
   GearSixIcon,
   LockKeyIcon,
   MagnifyingGlassIcon,
+  PaperPlaneTiltIcon,
   PauseIcon,
   PlayIcon,
   PlusIcon,
@@ -40,6 +41,7 @@ import {
   useState
 } from "react";
 import { api } from "./api";
+import { ScheduledPostsPanel } from "./ScheduledPosts";
 import {
   containedMediaBounds,
   subtitlePreviewScale
@@ -1740,6 +1742,7 @@ function Editor({
     string[]
   >([]);
   const [videoExportOpen, setVideoExportOpen] = useState(false);
+  const [showScheduled, setShowScheduled] = useState(false);
   const [videoResolution, setVideoResolution] =
     useState<"1080p" | "source">("1080p");
   const [videoQuality, setVideoQuality] =
@@ -3599,6 +3602,15 @@ function Editor({
             <FilmSlateIcon size={16} />
             Render queue {queuedClips.length ? `(${queuedClips.length})` : ""}
           </button>
+          <button
+            type="button"
+            className="icon-button editor-settings"
+            onClick={() => setShowScheduled(true)}
+            aria-label="Scheduled posts"
+            title="Scheduled posts"
+          >
+            <PaperPlaneTiltIcon size={16} />
+          </button>
         </div>
       </header>
 
@@ -3954,6 +3966,15 @@ function Editor({
               </button>
             </div>
           </div>
+        </div>
+      ) : null}
+
+      {showScheduled ? (
+        <div className="sched-overlay">
+          <ScheduledPostsPanel
+            projectId={projectId}
+            onClose={() => setShowScheduled(false)}
+          />
         </div>
       ) : null}
 

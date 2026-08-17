@@ -11,6 +11,10 @@ import type {
   Project,
   ProjectWorkspaceState,
   RuntimeStatus,
+  ScheduledPost,
+  ScheduledPostCreate,
+  ScheduledPostPatch,
+  ScheduledPostStatus,
   Segment,
   Speaker,
   SpeakerDetectionSettings,
@@ -19,7 +23,9 @@ import type {
   TimestampClip,
   TranslationProfile,
   VideoExportFolderSettings,
-  VoiceProfile
+  VoiceProfile,
+  XAccountSettingsStatus,
+  XAccountSettingsUpdate
 } from "./types";
 import { readableErrorMessage } from "./lib/errors";
 
@@ -437,5 +443,36 @@ export const api = {
     request<GlossaryEntry>(`/api/projects/${id}/glossary`, {
       method: "POST",
       body: JSON.stringify(entry)
+    }),
+  // --- X account + scheduled posts ---
+  xSettings: () => request<XAccountSettingsStatus>("/api/settings/x"),
+  saveXSettings: (update: XAccountSettingsUpdate) =>
+    request<XAccountSettingsStatus>("/api/settings/x", {
+      method: "PUT",
+      body: JSON.stringify(update)
+    }),
+  scheduledPosts: (status?: ScheduledPostStatus) =>
+    request<ScheduledPost[]>(
+      `/api/scheduled-posts${status ? `?status=${status}` : ""}`
+    ),
+  createScheduledPost: (data: ScheduledPostCreate) =>
+    request<ScheduledPost>("/api/scheduled-posts", {
+      method: "POST",
+      body: JSON.stringify(data)
+    }),
+  updateScheduledPost: (postId: string, patch: ScheduledPostPatch) =>
+    request<ScheduledPost>(`/api/scheduled-posts/${postId}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch)
+    }),
+  deleteScheduledPost: (postId: string) =>
+    request<void>(`/api/scheduled-posts/${postId}`, { method: "DELETE" }),
+  cancelScheduledPost: (postId: string) =>
+    request<ScheduledPost>(`/api/scheduled-posts/${postId}/cancel`, {
+      method: "POST"
+    }),
+  publishDueScheduledPosts: () =>
+    request<{ posted: number }>("/api/scheduled-posts/publish-due", {
+      method: "POST"
     })
 };
