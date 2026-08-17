@@ -2187,9 +2187,6 @@ def create_app(
                 store.save_setting("HUGGINGFACE_TOKEN", token)
         return speaker_detection_status()
 
-    if static_root and static_root.is_dir():
-        app.mount("/", StaticFiles(directory=static_root, html=True), name="desktop")
-
     # --- Agent orchestration + X scheduling -------------------------------
 
     @app.post(
@@ -2358,6 +2355,9 @@ def create_app(
 
     xpost.register_poster("api", xapi.post_to_x)
     xpost.start_scheduler(store)
+
+    if static_root and static_root.is_dir():
+        app.mount("/", StaticFiles(directory=static_root, html=True), name="desktop")
 
     return app
 
