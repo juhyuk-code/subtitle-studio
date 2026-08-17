@@ -1519,6 +1519,13 @@ legend { font-size: calc(11px * var(--app-font-scale)); font-weight: 600; margin
 }
 .sched-modal h3 { margin: 0; font-size: calc(17px * var(--app-font-scale)); letter-spacing: -.01em; }
 .sched-modal .modal-sub { margin: 0; font-size: calc(11px * var(--app-font-scale)); color: var(--muted); line-height: 1.5; }
+.sched-modal .modal-sub strong { color: var(--ink); }
+.sched-modal .modal-note {
+  margin: 0; padding: 9px 11px; border-radius: 8px; border: 1px solid #e3c97f;
+  background: #fbf3dc; color: #7a5b12; font-size: calc(11px * var(--app-font-scale));
+  line-height: 1.45;
+}
+.sched-modal .modal-note strong { color: #6b4d0a; }
 .sched-modal label {
   display: flex; flex-direction: column; gap: 6px; font-size: calc(11px * var(--app-font-scale));
   font-weight: 600; color: var(--ink);

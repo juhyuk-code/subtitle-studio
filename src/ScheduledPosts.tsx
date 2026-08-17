@@ -429,26 +429,58 @@ function ConnectXModal({
       <form className="modal sched-modal" onClick={(e) => e.stopPropagation()} onSubmit={handleSubmit}>
         <h3>Connect X (Twitter)</h3>
         <p className="modal-sub">
-          Create a free developer app at developer.x.com, then paste the four
-          keys below. Posting is billed per use — no subscription required.
+          From <strong>developer.x.com</strong> → your app →{" "}
+          <strong>Keys and tokens</strong>, paste the 4{" "}
+          <strong>OAuth 1.0a</strong> keys below (not the Bearer Token).
         </p>
         {error ? <div className="inline-error">{error}</div> : null}
         <label>
-          API key
-          <input value={apiKey} onChange={(e) => setApiKey(e.target.value)} required />
+          Consumer Key (API Key)
+          <input
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            placeholder="소비자 키"
+            autoComplete="off"
+            required
+          />
         </label>
         <label>
-          API secret
-          <input type="password" value={apiSecret} onChange={(e) => setApiSecret(e.target.value)} required />
+          Consumer Secret (API Secret)
+          <input
+            type="password"
+            value={apiSecret}
+            onChange={(e) => setApiSecret(e.target.value)}
+            placeholder="소비자 비밀 키"
+            autoComplete="off"
+            required
+          />
         </label>
         <label>
-          Access token
-          <input value={accessToken} onChange={(e) => setAccessToken(e.target.value)} required />
+          Access Token
+          <input
+            value={accessToken}
+            onChange={(e) => setAccessToken(e.target.value)}
+            placeholder="액세스 토큰"
+            autoComplete="off"
+            required
+          />
         </label>
         <label>
-          Access secret
-          <input type="password" value={accessSecret} onChange={(e) => setAccessSecret(e.target.value)} required />
+          Access Token Secret
+          <input
+            type="password"
+            value={accessSecret}
+            onChange={(e) => setAccessSecret(e.target.value)}
+            placeholder="액세스 토큰 비밀 키"
+            autoComplete="off"
+            required
+          />
         </label>
+        <p className="modal-note">
+          ⚠️ Your Access Token must have <strong>Read and Write</strong>{" "}
+          permission to post. If it says "Read" only, set App permissions to
+          Read and Write, then regenerate the token.
+        </p>
         <div className="modal-actions">
           <button type="button" className="ghost" onClick={onClose}>
             Cancel
