@@ -71,6 +71,35 @@ def test_create_and_list_scheduled_post(client):
     assert listed[0]["post_id"] == post["post_id"]
 
 
+def test_scheduled_post_accepts_premium_length_text(client):
+    # X Premium allows up to 25,000 characters; a 5,000-char post must be
+    # accepted (the old 4,000 cap would have rejected it).
+    long_text = "word " * 1000  # 5,000 characters
+    created = client.post(
+        "/api/scheduled-posts",
+        json={
+            "project_id": "prj_1",
+            "text": long_text,
+            "scheduled_at": _future(120),
+        },
+    )
+    assert created.status_code == 201
+    assert len(created.json()["text"]) == len(long_text)
+
+
+def test_scheduled_post_rejects_text_over_25k(client):
+    too_long = "x" * 25_001
+    created = client.post(
+        "/api/scheduled-posts",
+        json={
+            "project_id": "prj_1",
+            "text": too_long,
+            "scheduled_at": _future(120),
+        },
+    )
+    assert created.status_code == 422
+
+
 def test_due_post_is_published_via_registered_poster(client, monkeypatch):
     published: list[str] = []
 
