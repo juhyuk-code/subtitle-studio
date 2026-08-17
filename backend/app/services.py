@@ -105,32 +105,130 @@ Use speaker labels to preserve each voice and turn-taking. Never invent a speake
 Use contractions naturally. Do not add explanations or create subtitle line breaks.
 Return only JSON: {"translations":[{"segment_id":"...","english":"...","warnings":[]}]}"""
 
-POST_COPY_PROMPT = """Create compelling social post copy for one podcast clip using only the supplied English transcript.
+POST_COPY_PROMPT = """# Project: Twitter/X Clip Captions
 
-First, silently review the entire clip and select the single moment with the highest "wait, what?" value: the wildest, most provocative, surprising, funny, controversial, or unusually specific claim. Ignore setup, background, repeated points, and weaker topics.
+You are helping create short Twitter/X posts from interview and podcast transcripts.
 
-Output rules:
-- Headline: one concrete standalone hook about that single moment.
-- Body: a sequence of lightly cleaned direct-quote blocks that includes every essential detail a reader needs to understand the message without watching the clip.
-- Include necessary setup, the core claim, and its reasoning or consequence when those are required for the point to make sense.
-- Let completeness determine the length. Do not shorten away essential information and do not use an arbitrary word count.
-- Put each distinct sentence, claim, example, reaction, or conclusion in its own quoted paragraph, separated by a blank line.
-- Keep the quote blocks in transcript order. Never collapse the selected excerpt into one long quote paragraph.
-- When speakers change, prefix the first quote in that speaker's turn with `Name:`. Do not repeat the name on every following quote from the same turn.
-- Lightly clean filler words only. Preserve the actual claim, names, numbers, humor, profanity, and speaker position.
-- Add speaker names only when needed to understand a multi-speaker exchange.
-- Do not summarize the whole clip or include multiple interesting moments.
-- Remove repetition, tangents, greetings, and lines that do not help the reader digest the selected message.
-- Do not invent context, reactions, facts, clickbait, hashtags, emoji, calls to action, or commentary.
-- Do not add an introduction or a conclusion.
+## Default objective
+
+Identify the clip's central argument and turn it into a concise, provocative post that makes people want to watch the video.
+
+The post should emphasize the speaker's most important idea—not merely the most sensational sentence.
+
+## Default output format
+
+Always use this structure:
+
+[Speaker's full name] + one sentence explaining their central argument.
+
+"Short supporting quote."
+
+"Short supporting quote."
+
+"Short supporting quote."
+
+"Short supporting quote."
+
+"Strong concluding quote."
+
+Do not add a title, introduction, explanation, hashtags, emojis, timestamps, or commentary unless requested.
+
+## Opening statement
+
+The first sentence must:
+
+* Begin with or prominently include the speaker's full name.
+* Clearly explain the clip's main argument.
+* Provide enough context for someone who has not watched the interview.
+* Be assertive and interesting without misrepresenting the speaker.
+* Usually stay under 30 words.
 
 Example:
-Headline: FaZe Banks explains why the stock market no longer feels safe
-Body: "The stock market is trading like meme coins. You're watching SanDisk down 55% in the last 30 days."
 
-"This is supposed to be where you park your money. You work your entire life, put your savings into Microsoft, Apple, and Google, and feel safe."
+Illia Polosukhin argues that open-source AI is essential to keeping research accessible and preventing a handful of labs from controlling the field.
 
-"Not today. These companies are trading like meme coins."
+## Quote selection
+
+After the opening statement, include 4–7 short quotes that build the speaker's argument.
+
+Each quote should:
+
+* Contain only one clear idea.
+* Usually be under 12 words.
+* Work independently as an on-screen caption.
+* Follow the logical progression of the original argument.
+* Preserve the speaker's meaning, tone, and level of certainty.
+* Prioritize concrete, provocative language over generic statements.
+
+Arrange the quotes so they create a narrative:
+
+1. Establish what would be lost.
+2. Explain the practical consequence.
+3. Identify the danger or concentration of power.
+4. End with the strongest conclusion.
+
+## Transcript fidelity
+
+Stay loyal to the original transcript.
+
+Light editing is allowed to:
+
+* Remove filler words and repetition.
+* Correct obvious transcription errors.
+* Shorten a sentence without changing its meaning.
+* Replace unclear pronouns with the subject being discussed.
+* Make spoken grammar readable.
+
+Do not:
+
+* Invent arguments the speaker did not make.
+* Turn an implication into a direct claim.
+* Make the speaker sound more certain than they were.
+* Combine unrelated statements into a fabricated quote.
+* Add fashionable language such as "accountability," "democratization," or "counterweight" unless the speaker expressed that idea.
+* Present a loose paraphrase inside quotation marks.
+
+If a line cannot remain faithful while being shortened, exclude it.
+
+## Style
+
+The writing should feel:
+
+* Intelligent
+* Direct
+* Provocative
+* Minimal
+* Human
+* Native to Twitter/X
+
+Avoid corporate language, vague summaries, exaggerated clickbait, and repetitive quotes.
+
+## Punctuation
+
+* No em dashes
+
+## Topic emphasis
+
+Determine the actual subject of the clip before choosing quotes. If the clip is primarily about open-source models, the post must explain why open-source models matter. Do not let a provocative side comment overshadow the central argument.
+
+## Final quality check
+
+Before answering, verify:
+
+* Does the opener accurately capture the clip's main argument?
+* Is the speaker named immediately?
+* Can every quoted line be traced to something the speaker actually said?
+* Did shortening preserve the original meaning?
+* Do the quotes collectively explain why the argument matters?
+* Is the strongest quote placed near the end?
+* Can the post be understood without additional context?
+
+## Output format (required by the app)
+
+Return exactly one JSON object, nothing else:
+
+- "headline": the opening statement (speaker's full name + one sentence explaining the central argument).
+- "body": the 4–7 supporting quotes, each on its own line, separated by blank lines, in narrative order.
 
 Return only JSON: {"headline":"...","body":"..."}"""
 
