@@ -228,7 +228,7 @@ Before answering, verify:
 Return exactly one JSON object, nothing else:
 
 - "headline": the opening statement (speaker's full name + one sentence explaining the central argument).
-- "body": the 4–7 supporting quotes, each on its own line, separated by blank lines, in narrative order.
+- "body": the 4–7 supporting quotes, each wrapped in double quotes ("like this"), each on its own line, separated by blank lines, in narrative order.
 
 Return only JSON: {"headline":"...","body":"..."}"""
 
