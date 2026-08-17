@@ -1470,21 +1470,24 @@ legend { font-size: calc(11px * var(--app-font-scale)); font-weight: 600; margin
 .sched-none { color: var(--muted); font-size: calc(12px * var(--app-font-scale)); margin: 0 2px; }
 
 .post-card {
-  display: grid; grid-template-columns: 220px 1fr; gap: 16px;
+  display: flex; flex-direction: column; gap: 12px;
   background: white; border: 1px solid var(--line); border-radius: 12px;
   padding: 14px; margin-bottom: 12px; box-shadow: 0 1px 2px rgba(37,39,36,.05);
 }
 .post-card.failed { border-color: #deb6aa; }
-.post-media { width: 220px; aspect-ratio: 16/9; border-radius: 8px; overflow: hidden; background: #17181a; }
+.post-media {
+  width: 100%; aspect-ratio: 16/9; max-height: 420px; border-radius: 8px;
+  overflow: hidden; background: #17181a;
+}
 .post-media video { width: 100%; height: 100%; object-fit: contain; display: block; }
 .post-media-placeholder {
-  width: 100%; height: 100%; display: flex; flex-direction: column;
+  width: 100%; height: 100%; min-height: 200px; display: flex; flex-direction: column;
   align-items: center; justify-content: center; gap: 6px; color: #6b6d67;
   font-size: calc(10px * var(--app-font-scale));
 }
 
-.post-detail { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
-.post-top { display: flex; align-items: center; gap: 10px; }
+.post-detail { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.post-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .post-status {
   font-size: calc(10px * var(--app-font-scale)); font-weight: 700; padding: 2px 8px;
   border-radius: 999px; letter-spacing: .02em;
@@ -1495,21 +1498,41 @@ legend { font-size: calc(11px * var(--app-font-scale)); font-weight: 600; margin
 .post-status.bad { background: #f5e0e0; color: #8f2318; }
 .post-status.muted { background: #e9e6de; color: var(--muted); }
 .post-time { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: calc(11px * var(--app-font-scale)); }
-.post-source { font-size: calc(12px * var(--app-font-scale)); color: var(--ink); }
-.post-source span { color: var(--muted); }
-.post-headline { font-weight: 700; font-size: calc(13px * var(--app-font-scale)); color: var(--ink); }
+.post-clip { color: var(--muted); font-size: calc(11px * var(--app-font-scale)); }
 .post-text {
   margin: 0; font-size: calc(12px * var(--app-font-scale)); color: #3c3e3a;
-  white-space: pre-wrap; word-break: break-word; line-height: 1.45;
+  white-space: pre-wrap; word-break: break-word; line-height: 1.5;
+}
+.post-text:not(.expanded) {
   display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden;
 }
+.post-expand {
+  align-self: flex-start; border: 0; background: transparent; padding: 0; cursor: pointer;
+  color: var(--accent-dark); font-size: calc(11px * var(--app-font-scale)); font-weight: 600;
+}
+.post-expand:hover { text-decoration: underline; }
 .post-error {
   display: flex; align-items: center; gap: 6px; color: #8f2318;
   font-size: calc(11px * var(--app-font-scale));
 }
 .post-link { color: var(--accent-dark); font-weight: 600; font-size: calc(11px * var(--app-font-scale)); text-decoration: none; }
 .post-link:hover { text-decoration: underline; }
-.post-actions { display: flex; gap: 8px; margin-top: auto; padding-top: 6px; }
+.post-actions { display: flex; gap: 8px; padding-top: 4px; flex-wrap: wrap; }
+.primary.small { min-height: 28px; padding: 0 12px; font-size: calc(11px * var(--app-font-scale)); }
+.post-edit { display: flex; flex-direction: column; gap: 8px; }
+.post-edit-textarea {
+  width: 100%; min-height: 140px; border: 1px solid var(--line); border-radius: 8px;
+  padding: 10px 12px; background: white; font-size: calc(12px * var(--app-font-scale));
+  color: var(--ink); resize: vertical; font-family: inherit;
+}
+.post-edit-when {
+  display: flex; flex-direction: column; gap: 4px; font-size: calc(11px * var(--app-font-scale));
+  font-weight: 600; color: var(--ink);
+}
+.post-edit-when input {
+  border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: white;
+  font-size: calc(12px * var(--app-font-scale)); color: var(--ink); font-weight: 400;
+}
 
 /* modals reuse the shared .modal-backdrop; panel-specific form layout below */
 .sched-modal {
@@ -1540,6 +1563,5 @@ legend { font-size: calc(11px * var(--app-font-scale)); font-weight: 600; margin
 .sched-preview video { width: 100%; max-height: 200px; display: block; }
 
 @media (max-width: 620px) {
-  .post-card { grid-template-columns: 1fr; }
-  .post-media { width: 100%; }
+  .post-media { max-height: 260px; }
 }

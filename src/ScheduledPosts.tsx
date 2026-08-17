@@ -331,10 +331,49 @@ function PostCard({
   onDelete: (post: ScheduledPost) => void;
   onChanged: () => Promise<void>;
 }) {
-  const { post, project, clip, postCopy, videoUrl } = item;
+  const { post, clip, videoUrl } = item;
   const meta = statusMeta(post.status);
-  const [editing, setEditing] = useState(false);
   const editable = post.status === "pending";
+  const [expanded, setExpanded] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draftText, setDraftText] = useState(post.text);
+  const [draftWhen, setDraftWhen] = useState(
+    toLocalInputValue(post.scheduled_at)
+  );
+  const [saving, setSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+
+  const isLong =
+    post.text.length > 180 || post.text.split("\n").filter(Boolean).length > 4;
+
+  function startEdit() {
+    setDraftText(post.text);
+    setDraftWhen(toLocalInputValue(post.scheduled_at));
+    setEditError(null);
+    setEditing(true);
+  }
+
+  function cancelEdit() {
+    setEditing(false);
+    setEditError(null);
+  }
+
+  async function saveEdit() {
+    setSaving(true);
+    setEditError(null);
+    try {
+      await api.updateScheduledPost(post.post_id, {
+        text: draftText,
+        scheduled_at: new Date(draftWhen).toISOString()
+      });
+      setEditing(false);
+      await onChanged();
+    } catch (reason) {
+      setEditError(reason instanceof Error ? reason.message : "Could not save.");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <article className={`post-card ${meta.className}`}>
@@ -355,53 +394,95 @@ function PostCard({
             <ClockIcon size={13} />
             {formatDateTime(post.scheduled_at)}
           </span>
+          {clip ? <span className="post-clip"> · {clip.title}</span> : null}
         </div>
-        <div className="post-source">
-          <strong>{project?.name ?? "Unknown project"}</strong>
-          {clip ? <span> · {clip.title}</span> : null}
-        </div>
-        {postCopy?.headline ? (
-          <div className="post-headline">{postCopy.headline}</div>
-        ) : null}
-        <p className="post-text">{post.text}</p>
-        {post.error ? (
-          <div className="post-error">
-            <WarningCircleIcon size={14} /> {post.error}
+
+        {editing ? (
+          <div className="post-edit">
+            <textarea
+              className="post-edit-textarea"
+              value={draftText}
+              onChange={(e) => setDraftText(e.target.value)}
+              rows={8}
+              autoFocus
+            />
+            <label className="post-edit-when">
+              <span>When</span>
+              <input
+                type="datetime-local"
+                value={draftWhen}
+                onChange={(e) => setDraftWhen(e.target.value)}
+              />
+            </label>
+            {editError ? (
+              <div className="post-error">
+                <WarningCircleIcon size={14} /> {editError}
+              </div>
+            ) : null}
+            <div className="post-actions">
+              <button
+                className="primary small"
+                onClick={saveEdit}
+                disabled={saving}
+              >
+                {saving ? "Saving…" : "Save"}
+              </button>
+              <button className="ghost small" onClick={cancelEdit}>
+                Cancel
+              </button>
+            </div>
           </div>
-        ) : null}
-        {post.result_url ? (
-          <a className="post-link" href={post.result_url} target="_blank" rel="noreferrer">
-            View on X
-          </a>
-        ) : null}
-        <div className="post-actions">
-          {editable ? (
-            <button className="ghost small" onClick={() => setEditing(true)}>
-              <PencilSimpleIcon size={14} /> Edit
-            </button>
-          ) : null}
-          {post.status === "pending" ? (
-            <button className="ghost small" onClick={() => onCancel(post)}>
-              Cancel
-            </button>
-          ) : null}
-          {post.status !== "posted" ? (
-            <button className="ghost small danger" onClick={() => onDelete(post)}>
-              <TrashIcon size={14} /> Delete
-            </button>
-          ) : null}
-        </div>
+        ) : (
+          <>
+            <p className={`post-text ${expanded ? "expanded" : ""}`}>
+              {post.text}
+            </p>
+            {isLong ? (
+              <button
+                className="post-expand"
+                onClick={() => setExpanded((current) => !current)}
+              >
+                {expanded ? "Show less" : "Show more"}
+              </button>
+            ) : null}
+            {post.error ? (
+              <div className="post-error">
+                <WarningCircleIcon size={14} /> {post.error}
+              </div>
+            ) : null}
+            {post.result_url ? (
+              <a
+                className="post-link"
+                href={post.result_url}
+                target="_blank"
+                rel="noreferrer"
+              >
+                View on X
+              </a>
+            ) : null}
+            <div className="post-actions">
+              {editable ? (
+                <button className="ghost small" onClick={startEdit}>
+                  <PencilSimpleIcon size={14} /> Edit
+                </button>
+              ) : null}
+              {post.status === "pending" ? (
+                <button className="ghost small" onClick={() => onCancel(post)}>
+                  Cancel
+                </button>
+              ) : null}
+              {post.status !== "posted" ? (
+                <button
+                  className="ghost small danger"
+                  onClick={() => onDelete(post)}
+                >
+                  <TrashIcon size={14} /> Delete
+                </button>
+              ) : null}
+            </div>
+          </>
+        )}
       </div>
-      {editing ? (
-        <EditPostModal
-          post={post}
-          onClose={() => setEditing(false)}
-          onSaved={async () => {
-            setEditing(false);
-            await onChanged();
-          }}
-        />
-      ) : null}
     </article>
   );
 }
@@ -646,59 +727,3 @@ function NewPostModal({
   );
 }
 
-function EditPostModal({
-  post,
-  onClose,
-  onSaved
-}: {
-  post: ScheduledPost;
-  onClose: () => void;
-  onSaved: () => Promise<void>;
-}) {
-  const [text, setText] = useState(post.text);
-  const [when, setWhen] = useState(toLocalInputValue(post.scheduled_at));
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function handleSubmit(event: FormEvent) {
-    event.preventDefault();
-    setSaving(true);
-    setError(null);
-    try {
-      await api.updateScheduledPost(post.post_id, {
-        text,
-        scheduled_at: new Date(when).toISOString()
-      });
-      await onSaved();
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Could not save.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <form className="modal sched-modal" onClick={(e) => e.stopPropagation()} onSubmit={handleSubmit}>
-        <h3>Edit scheduled post</h3>
-        {error ? <div className="inline-error">{error}</div> : null}
-        <label>
-          Post text
-          <textarea rows={4} value={text} onChange={(e) => setText(e.target.value)} required />
-        </label>
-        <label>
-          When
-          <input type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)} required />
-        </label>
-        <div className="modal-actions">
-          <button type="button" className="ghost" onClick={onClose}>
-            Cancel
-          </button>
-          <button type="submit" className="primary" disabled={saving}>
-            {saving ? "Saving…" : "Save changes"}
-          </button>
-        </div>
-      </form>
-    </div>
-  );
-}
