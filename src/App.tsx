@@ -394,7 +394,6 @@ function App() {
   const [runtime, setRuntime] = useState<RuntimeStatus | null>(null);
   const [creating, setCreating] = useState(false);
   const [connecting, setConnecting] = useState(false);
-  const [showScheduled, setShowScheduled] = useState(false);
   const [settingsRevision, setSettingsRevision] = useState(0);
   const [appFontScale, setAppFontScale] = useState(1);
   const [savedSidebarWidth, setSavedSidebarWidth] = useState(245);
@@ -580,13 +579,6 @@ function App() {
         <div className="home-nav-actions">
           <button
             className="connection-button"
-            onClick={() => setShowScheduled(true)}
-          >
-            <PaperPlaneTiltIcon size={15} weight="bold" />
-            Scheduled posts
-          </button>
-          <button
-            className="connection-button"
             onClick={() => setConnecting(true)}
           >
             <span className={runtime?.openrouter_configured ? "connection-dot ready" : "connection-dot"} />
@@ -686,12 +678,6 @@ function App() {
           <p>Correction and translation send transcript text to OpenRouter.</p>
         </aside>
       </main>
-
-      {showScheduled ? (
-        <div className="sched-overlay">
-          <ScheduledPostsPanel onClose={() => setShowScheduled(false)} />
-        </div>
-      ) : null}
 
       {creating ? (
         <NewProjectModal
@@ -1756,6 +1742,7 @@ function Editor({
     string[]
   >([]);
   const [videoExportOpen, setVideoExportOpen] = useState(false);
+  const [showScheduled, setShowScheduled] = useState(false);
   const [videoResolution, setVideoResolution] =
     useState<"1080p" | "source">("1080p");
   const [videoQuality, setVideoQuality] =
@@ -3615,6 +3602,15 @@ function Editor({
             <FilmSlateIcon size={16} />
             Render queue {queuedClips.length ? `(${queuedClips.length})` : ""}
           </button>
+          <button
+            type="button"
+            className="icon-button editor-settings"
+            onClick={() => setShowScheduled(true)}
+            aria-label="Scheduled posts"
+            title="Scheduled posts"
+          >
+            <PaperPlaneTiltIcon size={16} />
+          </button>
         </div>
       </header>
 
@@ -3970,6 +3966,15 @@ function Editor({
               </button>
             </div>
           </div>
+        </div>
+      ) : null}
+
+      {showScheduled ? (
+        <div className="sched-overlay">
+          <ScheduledPostsPanel
+            projectId={projectId}
+            onClose={() => setShowScheduled(false)}
+          />
         </div>
       ) : null}
 

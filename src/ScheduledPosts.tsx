@@ -69,7 +69,13 @@ function statusMeta(status: ScheduledPost["status"]) {
   }
 }
 
-export function ScheduledPostsPanel({ onClose }: { onClose: () => void }) {
+export function ScheduledPostsPanel({
+  onClose,
+  projectId
+}: {
+  onClose: () => void;
+  projectId?: string;
+}) {
   const [posts, setPosts] = useState<EnrichedPost[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [xSettings, setXSettings] = useState<XAccountSettingsStatus | null>(null);
@@ -78,6 +84,12 @@ export function ScheduledPostsPanel({ onClose }: { onClose: () => void }) {
   const [showConnect, setShowConnect] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [publishing, setPublishing] = useState(false);
+
+  const scopeTitle = useMemo(() => {
+    if (!projectId) return null;
+    const project = projects.find((p) => p.project_id === projectId);
+    return project?.name ?? "This project";
+  }, [projectId, projects]);
 
   const enrich = useCallback(
     async (allPosts: ScheduledPost[], allProjects: Project[]) => {
@@ -123,8 +135,11 @@ export function ScheduledPostsPanel({ onClose }: { onClose: () => void }) {
     ]);
     setProjects(allProjects);
     setXSettings(settings);
-    setPosts(await enrich(allPosts, allProjects));
-  }, [enrich]);
+    const scoped = projectId
+      ? allPosts.filter((p) => p.project_id === projectId)
+      : allPosts;
+    setPosts(await enrich(scoped, allProjects));
+  }, [enrich, projectId]);
 
   useEffect(() => {
     let mounted = true;
@@ -192,7 +207,7 @@ export function ScheduledPostsPanel({ onClose }: { onClose: () => void }) {
         <div className="sched-title">
           <PaperPlaneTiltIcon size={22} weight="bold" />
           <div>
-            <h2>Scheduled posts</h2>
+            <h2>{scopeTitle ? `${scopeTitle} — posts` : "Scheduled posts"}</h2>
             <p>
               {xSettings?.configured
                 ? "X account connected"
@@ -293,6 +308,7 @@ export function ScheduledPostsPanel({ onClose }: { onClose: () => void }) {
       {showNew ? (
         <NewPostModal
           projects={projects}
+          defaultProjectId={projectId}
           onClose={() => setShowNew(false)}
           onSaved={async () => {
             setShowNew(false);
@@ -496,14 +512,18 @@ function ConnectXModal({
 
 function NewPostModal({
   projects,
+  defaultProjectId,
   onClose,
   onSaved
 }: {
   projects: Project[];
+  defaultProjectId?: string;
   onClose: () => void;
   onSaved: () => Promise<void>;
 }) {
-  const [projectId, setProjectId] = useState(projects[0]?.project_id ?? "");
+  const [projectId, setProjectId] = useState(
+    defaultProjectId ?? projects[0]?.project_id ?? ""
+  );
   const [clips, setClips] = useState<TimestampClip[]>([]);
   const [clipId, setClipId] = useState<string>("");
   const [text, setText] = useState("");
@@ -565,16 +585,18 @@ function NewPostModal({
       <form className="modal sched-modal" onClick={(e) => e.stopPropagation()} onSubmit={handleSubmit}>
         <h3>Schedule a post</h3>
         {error ? <div className="inline-error">{error}</div> : null}
-        <label>
-          Project
-          <select value={projectId} onChange={(e) => setProjectId(e.target.value)}>
-            {projects.map((p) => (
-              <option key={p.project_id} value={p.project_id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        {defaultProjectId ? null : (
+          <label>
+            Project
+            <select value={projectId} onChange={(e) => setProjectId(e.target.value)}>
+              {projects.map((p) => (
+                <option key={p.project_id} value={p.project_id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         {clips.length ? (
           <label>
             Clip

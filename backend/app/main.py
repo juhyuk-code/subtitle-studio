@@ -25,7 +25,7 @@ from .clips import parse_timestamp_markers
 from .desktop_paths import bundled_binary, open_folder, user_data_root
 from . import xpost
 from . import xapi
-from .agent_pipeline import clip_from_timestamps
+from .agent_pipeline import clip_from_timestamps, clip_everything
 from .models import (
     AppPreferences,
     AppPreferencesPatch,
@@ -2263,6 +2263,57 @@ def create_app(
             "error": job.error,
             "result": result,
         }
+
+    @app.post(
+        "/api/agent/projects/{project_id}/clip-everything",
+        response_model=dict,
+    )
+    async def agent_clip_everything(
+        project_id: str,
+        background: BackgroundTasks,
+    ):
+        """Clip every timestamp in an existing project in one shot.
+
+        Runs the full pipeline (diarize -> transcribe -> correct -> translate),
+        regenerates the burn-in captions, and exports every clip. Poll
+        GET /api/agent/jobs/{job_id} for completion.
+        """
+        if not store.get("project", project_id):
+            raise HTTPException(404, "Project not found")
+        if any(
+            job_is_active(item)
+            for item in store.list("job", project_id)
+        ):
+            raise HTTPException(409, "Another task is already running")
+
+        job = new_job(project_id, "agent_clip_everything")
+        store.save_job(job)
+
+        async def _run():
+            try:
+                project, results = await clip_everything(store, project_id)
+                finished = Job.model_validate(store.get("job", job.job_id))
+                finished.stage = "agent_completed"
+                finished.progress = 1
+                finished.error = None
+                store.save_job(finished)
+                store.put(
+                    "agent_result",
+                    "agent",
+                    job.job_id,
+                    {
+                        "project_id": project.project_id,
+                        "results": [r.model_dump() for r in results],
+                    },
+                )
+            except Exception as exc:  # noqa: BLE001
+                failed = Job.model_validate(store.get("job", job.job_id))
+                failed.stage = "failed"
+                failed.error = str(exc)
+                store.save_job(failed)
+
+        background.add_task(_run)
+        return {"job_id": job.job_id, "status": "started"}
 
     # --- X account settings ------------------------------------------------
 

@@ -26,6 +26,7 @@ from .models import (
     AgentClipResult,
     CaptionGenerationRequest,
     Job,
+    NavigationMarker,
     Project,
     ProjectCreate,
     TimestampClip,
@@ -169,6 +170,157 @@ async def clip_from_timestamps(
         request.resolution,
         request.quality,
         request.encoder,
+        [c.clip_id for c in clips],
+        True,
+        False,
+        False,
+    )
+    export_job = Job.model_validate(store.get("job", export_job.job_id))
+    if export_job.stage != "video_exported":
+        raise RuntimeError(export_job.error or "Video export failed")
+
+    outputs_by_clip = {o.clip_id: o for o in export_job.outputs if o.kind == "video"}
+    results: list[AgentClipResult] = []
+    for clip in clips:
+        output = outputs_by_clip.get(clip.clip_id)
+        output_path = (
+            str(store.video_export_root / output.output_name) if output else None
+        )
+        results.append(
+            AgentClipResult(
+                clip_id=clip.clip_id,
+                title=clip.title,
+                start_ms=clip.start_ms,
+                end_ms=clip.end_ms,
+                output_name=output.output_name if output else None,
+                output_url=output.output_url if output else None,
+                output_path=output_path,
+            )
+        )
+    return project, results
+
+
+def _derive_clips_from_markers(
+    store: Store, project: Project
+) -> list[TimestampClip]:
+    """Build one clip per timestamp: marker[i] -> marker[i+1] (last -> end)."""
+    markers = sorted(
+        (
+            NavigationMarker.model_validate(item)
+            for item in store.list("marker", project.project_id)
+        ),
+        key=lambda marker: marker.timestamp_ms,
+    )
+    if not markers:
+        raise ValueError(
+            "This project has no timestamps or clips. Import timestamps first."
+        )
+    clips: list[TimestampClip] = []
+    for index, marker in enumerate(markers):
+        start_ms = marker.timestamp_ms
+        end_ms = (
+            markers[index + 1].timestamp_ms
+            if index + 1 < len(markers)
+            else project.duration_ms
+        )
+        if end_ms <= start_ms:
+            continue
+        clip = TimestampClip(
+            clip_id=f"clip_{uuid4().hex[:12]}",
+            navigation_marker_id=marker.marker_id,
+            start_ms=start_ms,
+            end_ms=end_ms,
+            title=marker.title,
+            selected=True,
+            render_queued=True,
+            subtitle_style=project.subtitle_style,
+        )
+        store.save_clip(project.project_id, clip)
+        clips.append(clip)
+    return clips
+
+
+async def clip_everything(
+    store: Store,
+    project_id: str,
+    *,
+    resolution: str = "1080p",
+    quality: str = "maximum",
+    encoder: str = "gpu",
+    expected_speaker_count: int | None = None,
+) -> tuple[Project, list[AgentClipResult]]:
+    """Clip every timestamp in an existing project: full pipeline + export.
+
+    Reuses the same in-process services as ``clip_from_timestamps`` but operates
+    on an already-created project (the one the user is currently inside).
+    """
+    project_data = store.get("project", project_id)
+    if not project_data:
+        raise ValueError("Project not found")
+    project = Project.model_validate(project_data)
+    if not project.media_name:
+        raise ValueError("Upload media to this project before clipping.")
+
+    clips = [
+        TimestampClip.model_validate(item)
+        for item in store.list("clip", project_id)
+    ]
+    if not clips:
+        clips = _derive_clips_from_markers(store, project)
+
+    # Queue every clip for rendering.
+    clips = []
+    for item in store.list("clip", project_id):
+        clip = TimestampClip.model_validate(item)
+        if not clip.render_queued:
+            clip = clip.model_copy(update={"render_queued": True})
+            store.save_clip(project_id, clip)
+        clips.append(clip)
+    if not clips:
+        raise ValueError("No clips to render in this project.")
+
+    # 1) diarize -> transcribe -> correct -> translate (skips completed stages)
+    pipeline_job = new_job(project_id, "queued").model_copy(
+        update={
+            "pipeline": True,
+            "pipeline_step": 1,
+            "pipeline_total": 5,
+            "pipeline_completed": False,
+            "overall_progress": 0,
+        }
+    )
+    store.save_job(pipeline_job)
+    await run_english_pipeline(
+        store,
+        project_id,
+        pipeline_job.job_id,
+        clips,
+        expected_speaker_count,
+    )
+    finished = Job.model_validate(store.get("job", pipeline_job.job_id))
+    if finished.stage == "failed" or not finished.pipeline_completed:
+        raise RuntimeError(finished.error or "English pipeline did not complete")
+
+    # 2) regenerate the burn-in caption track
+    project = Project.model_validate(store.get("project", project_id))
+    track = generate_project_caption_track(
+        store.list("segment", project_id),
+        "en",
+        clips,
+        project.subtitle_style,
+    )
+    store.save_caption_track(project_id, track)
+
+    # 3) cut + burn + encode every clip
+    export_job = new_job(project_id, "exporting_video")
+    store.save_job(export_job)
+    run_video_export(
+        store,
+        project_id,
+        export_job.job_id,
+        resolution,
+        quality,
+        encoder,
         [c.clip_id for c in clips],
         True,
         False,
