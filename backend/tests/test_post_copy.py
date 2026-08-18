@@ -113,15 +113,15 @@ def test_post_copy_retries_an_incomplete_model_response(tmp_path, monkeypatch):
 
 def test_post_copy_prompt_follows_the_master_format():
     assert "central argument" in POST_COPY_PROMPT
-    assert "speaker's most important idea" in POST_COPY_PROMPT
-    assert "full name" in POST_COPY_PROMPT
-    assert "under 30 words" in POST_COPY_PROMPT
+    assert "clip's most important idea" in POST_COPY_PROMPT
+    assert "Never name or identify a speaker" in POST_COPY_PROMPT
+    assert "never over 30" in POST_COPY_PROMPT
     assert "under 12 words" in POST_COPY_PROMPT
-    assert "4–7 short quotes" in POST_COPY_PROMPT
+    assert "3–7 quotes" in POST_COPY_PROMPT
     assert "Stay loyal to the original transcript" in POST_COPY_PROMPT
     assert "separated by blank lines" in POST_COPY_PROMPT
     assert "Return only JSON" in POST_COPY_PROMPT
-    assert "No em dashes" in POST_COPY_PROMPT
+    assert "Never use em dashes" in POST_COPY_PROMPT
 
 
 def test_long_quote_is_split_into_sentence_by_sentence_blocks():
