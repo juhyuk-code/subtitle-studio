@@ -143,7 +143,7 @@ class ProjectSpeakerSettings(BaseModel):
 
 
 WorkspaceSidebarTab = Literal[
-    "stages", "timestamps", "speakers", "glossary", "style", "post_copy"
+    "stages", "timestamps", "speakers", "glossary", "style", "post_copy", "shortform_ideas"
 ]
 
 

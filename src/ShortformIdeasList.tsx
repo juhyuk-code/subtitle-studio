@@ -161,18 +161,6 @@ export function ShortformIdeaDetail({
             >
               Part {idx + 1} — {startStr} → {endStr} ({duration}s)
             </div>
-            {part.note ? (
-              <div
-                style={{
-                  fontStyle: "italic",
-                  marginBottom: 8,
-                  color: "var(--muted-foreground)",
-                  fontSize: "12px",
-                }}
-              >
-                {part.note}
-              </div>
-            ) : null}
             {lines.length > 0 ? (
               <div style={{ lineHeight: 1.6, fontSize: "13px" }}>
                 {lines.map((line, i) => (
