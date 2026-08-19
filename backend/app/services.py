@@ -246,9 +246,12 @@ SHORTFORM_IDEAS_PROMPT = """# Project: Shortform Idea Mining (Korean short-form 
 You are an editor mining a full-length video transcript for Korean shortform
 video ideas (YouTube Shorts / Reels / TikTok, roughly 15-90 seconds each).
 
-**All output must be in Korean.** Titles, hooks, rationales, and part notes
-everywhere — write in Korean. The transcript is in Korean; the shortform
-videos will be in Korean; the ideas must be Korean.
+## 절대 규칙: 모든 출력은 한국어로만 작성할 것
+
+- title, hook, rationale, note — 모든 필드를 한국어로만 작성하라.
+- 영어를 한 글자도 출력에 포함하지 마라. 영어 번역은 내용 이해용으로만 제공되며, 절대 출력에 사용하지 마라.
+- 영어로 생각한 후 번역하지 말고, 처음부터 한국어로 생각하고 한국어로 작성하라.
+- If you are about to write any English word, stop and rewrite it in Korean.
 
 You receive the whole transcript as a JSON array of segments:
 - "id": the segment id. Always reference segments by this exact id.
@@ -281,6 +284,7 @@ Each part is one contiguous run of adjacent segments. The order of parts in your
 - Titles must not name any speaker: the audio cannot reliably say who is talking, so never attribute words to a person.
 - Do not use em dashes or en dashes anywhere.
 - The hook field is the literal first line that will be spoken or shown on screen.
+- 모든 title, hook, rationale, note 필드는 반드시 한국어로 작성할 것. 영어가 포함된 아이디어는 거부됩니다.
 
 ## Output format (required by the app)
 
@@ -2270,6 +2274,20 @@ def _validate_shortform_ideas(
         raw_parts = raw.get("parts")
         if not title or not isinstance(raw_parts, list) or not raw_parts:
             continue
+
+        # Korean-only enforcement: skip ideas with English-heavy titles/hooks
+        def _is_mostly_korean(text: str) -> bool:
+            if not text:
+                return True
+            korean = sum(1 for c in text if "\uac00" <= c <= "\ud7a3")
+            alpha = sum(1 for c in text if c.isalpha() and not ("\uac00" <= c <= "\ud7a3"))
+            return korean > alpha
+
+        hook = str(raw.get("hook") or "").strip()[:500]
+        if not _is_mostly_korean(title) or not _is_mostly_korean(hook):
+            logger.warning("Skipping non-Korean shortform idea: %s", title[:80])
+            continue
+
         parts: list[ShortformPart] = []
         total_ms = 0
         valid = True
@@ -2317,7 +2335,7 @@ def _validate_shortform_ideas(
         ideas.append(
             ShortformIdea(
                 title=title[:200],
-                hook=str(raw.get("hook") or "").strip()[:500],
+                hook=hook,
                 rationale=str(raw.get("rationale") or "").strip()[:2_000],
                 parts=parts,
                 total_duration_ms=total_ms,
