@@ -159,7 +159,7 @@ def test_full_english_pipeline_starts_as_one_job(tmp_path, monkeypatch):
     job = response.json()
     assert job["pipeline"] is True
     assert job["pipeline_step"] == 1
-    assert job["pipeline_total"] == 5
+    assert job["pipeline_total"] == 6
     assert job["overall_progress"] == 0
     assert calls[0][1] == project.project_id
     assert calls[0][4] == 3
@@ -180,7 +180,7 @@ def test_pipeline_job_remains_active_between_stages(tmp_path):
             overall_progress=0.4,
             pipeline=True,
             pipeline_step=2,
-            pipeline_total=5,
+            pipeline_total=6,
         )
     )
 

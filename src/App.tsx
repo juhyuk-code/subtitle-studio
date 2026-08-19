@@ -42,6 +42,7 @@ import {
 } from "react";
 import { api } from "./api";
 import { ScheduledPostsPanel } from "./ScheduledPosts";
+import { ShortformIdeasList, ShortformIdeaDetail } from "./ShortformIdeasList";
 import {
   containedMediaBounds,
   subtitlePreviewScale
@@ -73,6 +74,8 @@ import type {
   ProjectWorkspaceState,
   RuntimeStatus,
   Segment,
+  ShortformIdea,
+  ShortformPart,
   Speaker,
   SubtitleStyle,
   SubtitleStylePreset,
@@ -131,6 +134,8 @@ const stageLabels: Record<string, string> = {
   correcting_pass_1: "Correcting nearby context",
   correcting_pass_2: "Checking episode consistency",
   translating: "Writing conversational English",
+  generating_shortform_ideas: "Generating shortform ideas",
+  shortform_ideas: "Shortform ideas ready",
   exporting_video: "Exporting captioned video",
   video_exported: "Video ready",
   failed: "Needs attention",
@@ -145,6 +150,7 @@ const terminalJobStages = [
   "corrected_pass_1",
   "corrected",
   "translated",
+  "shortform_ideas",
   "video_exported"
 ];
 
@@ -1694,6 +1700,10 @@ function Editor({
   const [clips, setClips] = useState<TimestampClip[]>([]);
   const [markers, setMarkers] = useState<NavigationMarker[]>([]);
   const [postCopies, setPostCopies] = useState<PostCopy[]>([]);
+  const [shortformIdeas, setShortformIdeas] = useState<ShortformIdea[]>([]);
+  const [selectedShortformIdeaId, setSelectedShortformIdeaId] = useState<
+    string | null
+  >(null);
   const [job, setJob] = useState<Job | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [activeClipId, setActiveClipId] = useState<string | null>(null);
@@ -1816,6 +1826,7 @@ function Editor({
       nextSpeakers,
       nextVoiceProfiles,
       nextPostCopies,
+      nextShortformIdeas,
       videoExports,
       activeJob
     ] = await Promise.all([
@@ -1828,6 +1839,7 @@ function Editor({
       api.speakers(projectId),
       api.voiceProfiles(),
       api.postCopies(projectId),
+      api.shortformIdeas(projectId),
       api.videoExports(projectId),
       api.activeJob(projectId)
     ]);
@@ -1840,6 +1852,7 @@ function Editor({
     setSpeakers(nextSpeakers);
     setVoiceProfiles(nextVoiceProfiles);
     setPostCopies(nextPostCopies);
+    setShortformIdeas(nextShortformIdeas);
     setLatestVideoExport(videoExports[0] ?? null);
     setJob(activeJob);
   }, [projectId]);
@@ -3984,7 +3997,7 @@ function Editor({
         style={{ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}
       >
         <aside className="editor-sidebar">
-          <div className="sidebar-tabs four">
+          <div className="sidebar-tabs five">
             <button
               className={sidebarTab === "timestamps" ? "active" : ""}
               onClick={() => setSidebarTab("timestamps")}
@@ -4014,6 +4027,14 @@ function Editor({
               title={!activeClip ? "Open a clip tab first" : undefined}
             >
               Post copy
+            </button>
+            <button
+              className={
+                sidebarTab === "shortform_ideas" ? "active" : ""
+              }
+              onClick={() => setSidebarTab("shortform_ideas")}
+            >
+              Ideas
             </button>
           </div>
           {sidebarTab === "stages" && activeClip ? (
@@ -4070,6 +4091,14 @@ function Editor({
               onSave={savePostCopy}
               onError={setError}
             />
+          ) : sidebarTab === "shortform_ideas" ? (
+            <div className="shortform-ideas-panel">
+              <ShortformIdeasList
+                ideas={shortformIdeas}
+                selectedId={selectedShortformIdeaId}
+                onSelect={(id) => setSelectedShortformIdeaId(id)}
+              />
+            </div>
           ) : (
             <SubtitleStylePanel
               value={subtitleStyle}
@@ -4130,7 +4159,16 @@ function Editor({
 
         <main className="workbench">
           {error || job?.error ? <InlineError message={error ?? job?.error ?? ""} /> : null}
-          {mediaPreparation && preparationCopy ? (
+          {selectedShortformIdeaId
+            ? (() => {
+                const idea = shortformIdeas.find(
+                  (i) => i.idea_id === selectedShortformIdeaId
+                );
+                return idea ? (
+                  <ShortformIdeaDetail idea={idea} segments={segments} />
+                ) : null;
+              })()
+            : mediaPreparation && preparationCopy ? (
             <section
               className={`media-preparation ${mediaPreparation.phase}`}
               role="status"

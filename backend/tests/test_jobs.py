@@ -67,7 +67,7 @@ def test_english_pipeline_runs_every_stage_in_order(tmp_path, monkeypatch):
         stage="queued",
         pipeline=True,
         pipeline_step=1,
-        pipeline_total=5,
+        pipeline_total=6,
     )
     store.save_job(job)
     calls = []
@@ -100,6 +100,11 @@ def test_english_pipeline_runs_every_stage_in_order(tmp_path, monkeypatch):
 
     monkeypatch.setattr(services, "run_language_stage", finish_language)
 
+    async def finish_shortform(*args):
+        finish("shortform_ideas", "shortform")
+
+    monkeypatch.setattr(services, "run_shortform_ideas_stage", finish_shortform)
+
     asyncio.run(
         run_english_pipeline(
             store,
@@ -116,8 +121,9 @@ def test_english_pipeline_runs_every_stage_in_order(tmp_path, monkeypatch):
         "pass-1",
         "pass-2",
         "translate",
+        "shortform",
     ]
-    assert completed.stage == "translated"
+    assert completed.stage == "shortform_ideas"
     assert completed.pipeline_completed is True
     assert completed.overall_progress == 1
 
@@ -134,7 +140,7 @@ def test_english_pipeline_skips_completed_stages(tmp_path, monkeypatch):
         stage="queued",
         pipeline=True,
         pipeline_step=3,
-        pipeline_total=5,
+        pipeline_total=6,
     )
     store.save_job(job)
     calls = []
@@ -163,6 +169,15 @@ def test_english_pipeline_skips_completed_stages(tmp_path, monkeypatch):
 
     monkeypatch.setattr(services, "run_language_stage", finish_language)
 
+    async def finish_shortform(*args):
+        current = Job.model_validate(store.get("job", job.job_id))
+        current.stage = "shortform_ideas"
+        current.progress = 1
+        store.save_job(current)
+        calls.append("shortform")
+
+    monkeypatch.setattr(services, "run_shortform_ideas_stage", finish_shortform)
+
     asyncio.run(
         run_english_pipeline(store, project.project_id, job.job_id)
     )
@@ -171,4 +186,5 @@ def test_english_pipeline_skips_completed_stages(tmp_path, monkeypatch):
         "correcting_pass_1",
         "correcting_pass_2",
         "translating",
+        "shortform",
     ]

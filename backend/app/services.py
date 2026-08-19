@@ -40,6 +40,8 @@ from .models import (
     PostCopy,
     Project,
     Segment,
+    ShortformIdea,
+    ShortformPart,
     SubtitleStyle,
     Speaker,
     TimestampClip,
@@ -83,6 +85,7 @@ WORKFLOW_RANK = {
     "corrected_pass_1": 4,
     "corrected": 5,
     "translated": 6,
+    "shortform_ideas": 7,
 }
 
 CORRECTION_PROMPT = """You are correcting Korean automatic speech recognition output.
@@ -238,6 +241,64 @@ Return exactly one JSON object, nothing else:
 Return only JSON: {"headline":"...","body":"..."}"""
 
 
+SHORTFORM_IDEAS_PROMPT = """# Project: Shortform Idea Mining (Korean short-form video)
+
+You are an editor mining a full-length video transcript for Korean shortform
+video ideas (YouTube Shorts / Reels / TikTok, roughly 15-90 seconds each).
+
+**All output must be in Korean.** Titles, hooks, rationales, and part notes
+everywhere — write in Korean. The transcript is in Korean; the shortform
+videos will be in Korean; the ideas must be Korean.
+
+You receive the whole transcript as a JSON array of segments:
+- "id": the segment id. Always reference segments by this exact id.
+- "s": start time in milliseconds.
+- "e": end time in milliseconds.
+- "ko": what was said in Korean.
+- "en": English translation (for understanding only — never include English in your output).
+
+## Core principle: splice by shared context, not by adjacency
+
+The strongest shortform moments rarely sit in one contiguous stretch. In long conversations a topic gets raised, dropped, and returned to later, sometimes minutes apart. Your job is to find the parts that share the SAME underlying context or argument, then splice them into one tight video arranged for maximum engagement. The parts of an idea do NOT need to be adjacent on the source timeline, and they do NOT need to be ordered chronologically.
+
+Each part is one contiguous run of adjacent segments. The order of parts in your answer is the CUT order: the sequence they will be edited together in. Put the strongest hook first.
+
+## What makes a good idea
+
+- One clear point per idea: a hot take, a concrete argument, a surprising fact, an emotional beat, or a vivid example.
+- The first part must hook within the first 1-3 seconds.
+- Total length 15-90 seconds. Prefer 30-60 seconds. Never exceed 90 seconds.
+- Every part must stand on its own after splicing: complete thoughts, no dangling pronouns or references that only made sense in the original context.
+- Ideas must not overlap. Each segment may appear in at most ONE idea across the whole answer. Pick the idea where a segment matters most.
+- Prefer concrete, specific, emotionally charged language over abstract statements.
+- Skip filler, small talk, setup, and anything that needs the full episode to make sense.
+
+## Rules
+
+- Reference only segment ids that exist in the input. Never invent segments, text, or timestamps.
+- Within one part, segment ids must be adjacent and ascending.
+- Give 5-10 ideas, ranked strongest first. Fewer, better ideas beat many weak ones.
+- Titles must not name any speaker: the audio cannot reliably say who is talking, so never attribute words to a person.
+- Do not use em dashes or en dashes anywhere.
+- The hook field is the literal first line that will be spoken or shown on screen.
+
+## Output format (required by the app)
+
+Return exactly one JSON object, nothing else:
+
+{"ideas": [
+  {
+    "title": "짧은 제목 (한국어)",
+    "hook": "화면에 처음 보여질 문장, 15단어 내외 (한국어)",
+    "rationale": "이 부분들이 하나의 숏폼으로 묶였을 때 왜 주목을 끄는지 한 문장 (한국어)",
+    "parts": [
+      {"segment_ids": ["seg_000012", "seg_000013"], "note": "이 파트가 전달하는 내용 (한국어)"},
+      {"segment_ids": ["seg_000140"], "note": "이 파트를 스플라이싱한 이유 (한국어)"}
+    ]
+  }
+]}"""
+
+
 def configured_value(
     key: str, store: Store | None = None, default: str = ""
 ) -> str:
@@ -268,7 +329,7 @@ def openrouter_headers(store: Store | None = None) -> dict[str, str]:
 
 def openrouter_model_for_stage(stage: str, store: Store | None = None) -> str:
     legacy_default = configured_value("OPENROUTER_MODEL", store)
-    if stage == "post_captioning":
+    if stage in {"post_captioning", "shortform_ideas"}:
         translation_model = configured_value(
             "OPENROUTER_TRANSLATION_MODEL",
             store,
@@ -2058,6 +2119,216 @@ async def generate_post_copy(
     return post_copy
 
 
+# --- Shortform idea mining --------------------------------------------------
+
+
+def shortform_transcript_payload(
+    store: Store, project_id: str
+) -> tuple[list[dict[str, Any]], str]:
+    """Build the compact transcript payload sent to the idea model.
+
+    Returns (segments, source_signature). Each segment is reduced to the
+    fields the model needs: id, start/end in ms, and the text.
+    """
+    raw_segments = store.list("segment", project_id)
+    compact = []
+    for item in sorted(
+        raw_segments, key=lambda row: (row.get("start_ms", 0), row.get("segment_id", ""))
+    ):
+        text = (
+            item.get("pass_2_korean")
+            or item.get("pass_1_korean")
+            or item.get("raw_korean")
+            or ""
+        ).strip()
+        if not text:
+            continue
+        entry: dict[str, Any] = {
+            "id": item["segment_id"],
+            "s": int(item.get("start_ms", 0)),
+            "e": int(item.get("end_ms", 0)),
+            "ko": text,
+        }
+        english = str(item.get("english") or "").strip()
+        if english:
+            entry["en"] = english
+        compact.append(entry)
+    signature_payload = json.dumps(compact, ensure_ascii=False, sort_keys=False)
+    signature = hashlib.sha256(signature_payload.encode("utf-8")).hexdigest()
+    return compact, signature
+
+
+def shortform_ideas_signature(
+    store: Store, project_id: str
+) -> str:
+    return shortform_transcript_payload(store, project_id)[1]
+
+
+async def generate_shortform_ideas(
+    store: Store, project_id: str, max_ideas: int = 10
+) -> list[ShortformIdea]:
+    """Mine the full transcript for shortform video ideas.
+
+    Ideas are splices of transcript parts that share a context; parts are
+    returned in cut order with resolved timestamps. Ideas are persisted and
+    returned ranked strongest first.
+    """
+    compact, signature = shortform_transcript_payload(store, project_id)
+    if not compact:
+        raise RuntimeError(
+            "Transcribe the video before mining shortform ideas."
+        )
+    duration_ms = compact[-1]["e"]
+    payload = {
+        "duration_ms": duration_ms,
+        "segments": compact,
+    }
+    result = await call_openrouter(
+        store, "shortform_ideas", SHORTFORM_IDEAS_PROMPT, payload
+    )
+    ideas = _validate_shortform_ideas(
+        result, compact, duration_ms, max_ideas
+    )
+    if not ideas:
+        raise RuntimeError(
+            "The language model returned no usable shortform ideas. Try again."
+        )
+    now = datetime.now(timezone.utc).isoformat()
+    for index, idea in enumerate(ideas):
+        idea.source_signature = signature
+        idea.generated_at = now
+        store.put(
+            "shortform_idea",
+            project_id,
+            f"{project_id}:{idea.idea_id}",
+            idea,
+            index,
+        )
+    return ideas
+
+
+async def run_shortform_ideas_stage(
+    store: Store,
+    project_id: str,
+    job_id: str,
+    clips: list[TimestampClip] | None = None,
+) -> None:
+    """Pipeline stage: mine the transcript for shortform ideas with timestamps.
+
+    Mirrors run_language_stage so it slots into run_english_pipeline as the
+    final step. Ideas are persisted (see generate_shortform_ideas) and the
+    project/clip workflow status advances to "shortform_ideas".
+    """
+    job = Job.model_validate(store.get("job", job_id))
+    try:
+        job.stage, job.progress = "generating_shortform_ideas", 0.1
+        _checkpoint_job(store, job)
+        await generate_shortform_ideas(store, project_id)
+        job = Job.model_validate(store.get("job", job_id))
+        job.stage, job.progress = "shortform_ideas", 1.0
+        _checkpoint_job(store, job)
+        _update_workflow_status(
+            store, project_id, "shortform_ideas", clips, all_clips=not clips
+        )
+    except JobCancelled:
+        return
+    except Exception as exc:
+        job = Job.model_validate(store.get("job", job_id))
+        job.stage, job.error = "failed", str(exc)
+        job.paused = False
+        store.save_job(job)
+
+
+def _validate_shortform_ideas(
+    result: dict[str, Any],
+    compact: list[dict[str, Any]],
+    duration_ms: int,
+    max_ideas: int,
+) -> list[ShortformIdea]:
+    """Validate LLM output against the real transcript and resolve timestamps.
+
+    Rejects invented segment ids, non-adjacent runs, overlapping ideas, and
+    ideas outside the 15-90 second window (hard cap 120 seconds).
+    """
+    segments_by_id = {item["id"]: item for item in compact}
+    adjacency: dict[str, str | None] = {}
+    for index, item in enumerate(compact):
+        adjacency[item["id"]] = (
+            compact[index + 1]["id"] if index + 1 < len(compact) else None
+        )
+    raw_ideas = result.get("ideas")
+    if not isinstance(raw_ideas, list):
+        raise RuntimeError(
+            "The language model returned an invalid shortform response."
+        )
+    ideas: list[ShortformIdea] = []
+    used_segment_ids: set[str] = set()
+    for raw in raw_ideas:
+        if not isinstance(raw, dict):
+            continue
+        title = str(raw.get("title") or "").strip()
+        raw_parts = raw.get("parts")
+        if not title or not isinstance(raw_parts, list) or not raw_parts:
+            continue
+        parts: list[ShortformPart] = []
+        total_ms = 0
+        valid = True
+        for raw_part in raw_parts:
+            if not isinstance(raw_part, dict):
+                valid = False
+                break
+            ids = raw_part.get("segment_ids")
+            if not isinstance(ids, list) or not ids:
+                valid = False
+                break
+            if not all(
+                isinstance(sid, str) and sid in segments_by_id for sid in ids
+            ):
+                valid = False
+                break
+            for pair in zip(ids, ids[1:]):
+                if adjacency[pair[0]] != pair[1]:
+                    valid = False
+                    break
+            if not valid:
+                break
+            if any(sid in used_segment_ids for sid in ids):
+                valid = False
+                break
+            part_ms = sum(
+                segments_by_id[sid]["e"] - segments_by_id[sid]["s"]
+                for sid in ids
+            )
+            parts.append(
+                ShortformPart(
+                    start_ms=segments_by_id[ids[0]]["s"],
+                    end_ms=segments_by_id[ids[-1]]["e"],
+                    segment_ids=list(ids),
+                    note=str(raw_part.get("note") or "").strip()[:500],
+                )
+            )
+            total_ms += part_ms
+        if not valid or not parts:
+            continue
+        if total_ms < 10_000 or total_ms > 120_000:
+            continue
+        for part in parts:
+            used_segment_ids.update(part.segment_ids)
+        ideas.append(
+            ShortformIdea(
+                title=title[:200],
+                hook=str(raw.get("hook") or "").strip()[:500],
+                rationale=str(raw.get("rationale") or "").strip()[:2_000],
+                parts=parts,
+                total_duration_ms=total_ms,
+                generated_at=datetime.now(timezone.utc).isoformat(),
+            )
+        )
+        if len(ideas) >= max_ideas:
+            break
+    return ideas
+
+
 def _dialogue_payload(
     store: Store,
     project_id: str,
@@ -2361,6 +2632,11 @@ async def run_english_pipeline(
                 "translating",
                 clips,
             ),
+        ),
+        (
+            6,
+            "shortform_ideas",
+            lambda: run_shortform_ideas_stage(store, project_id, job_id, clips),
         ),
     ]
     try:

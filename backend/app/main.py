@@ -47,6 +47,7 @@ from .models import (
     ProjectWorkspaceState,
     Segment,
     SegmentPatch,
+    ShortformIdea,
     Speaker,
     SpeakerDetectionSettingsStatus,
     SpeakerDetectionSettingsUpdate,
@@ -89,6 +90,9 @@ from .services import (
     generate_caption_track,
     generate_project_caption_track,
     generate_post_copy,
+    generate_shortform_ideas,
+    shortform_ideas_signature,
+    run_shortform_ideas_stage,
     media_duration_ms,
     media_frame_rate,
     prepare_segments_for_clips,
@@ -344,7 +348,7 @@ def create_app(
                 )
 
     def reset_replaced_media_timeline(project_id: str) -> None:
-        for kind in ("marker", "clip", "post_copy", "job"):
+        for kind in ("marker", "clip", "post_copy", "job", "shortform_idea"):
             store.delete_kind(kind, project_id)
         current_data = store.get("workspace", project_id)
         current = (
@@ -765,6 +769,90 @@ def create_app(
                 )
             }
         )
+
+    @app.post(
+        "/api/projects/{project_id}/shortform-ideas/generate",
+        response_model=list[ShortformIdea],
+    )
+    async def create_shortform_ideas(project_id: str):
+        if not store.get("project", project_id):
+            raise HTTPException(404, "Project not found")
+        try:
+            return await generate_shortform_ideas(store, project_id)
+        except RuntimeError as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+    @app.get(
+        "/api/projects/{project_id}/shortform-ideas",
+        response_model=list[ShortformIdea],
+    )
+    def list_shortform_ideas(project_id: str):
+        if not store.get("project", project_id):
+            raise HTTPException(404, "Project not found")
+        current_signature = shortform_ideas_signature(store, project_id)
+        ideas = [
+            ShortformIdea.model_validate(item)
+            for item in store.list("shortform_idea", project_id)
+        ]
+        return [
+            idea.model_copy(
+                update={
+                    "stale": bool(
+                        not current_signature
+                        or current_signature != idea.source_signature
+                    )
+                }
+            )
+            for idea in ideas
+        ]
+
+    @app.delete(
+        "/api/projects/{project_id}/shortform-ideas/{idea_id}",
+        status_code=204,
+    )
+    def delete_shortform_idea(project_id: str, idea_id: str):
+        if not store.get("project", project_id):
+            raise HTTPException(404, "Project not found")
+        if not store.get("shortform_idea", f"{project_id}:{idea_id}"):
+            raise HTTPException(404, "Idea not found")
+        store.delete("shortform_idea", f"{project_id}:{idea_id}")
+
+    @app.post(
+        "/api/projects/{project_id}/shortform-ideas/{idea_id}/clips",
+        response_model=list[TimestampClip],
+        status_code=201,
+    )
+    def materialize_shortform_idea(project_id: str, idea_id: str):
+        """Create one timestamp clip per part of an idea, in cut order.
+
+        Each part becomes a clip spanning its resolved timestamps so the user
+        can review and export them through the normal clip workflow.
+        """
+        project_data = store.get("project", project_id)
+        if not project_data:
+            raise HTTPException(404, "Project not found")
+        project = Project.model_validate(project_data)
+        idea_data = store.get("shortform_idea", f"{project_id}:{idea_id}")
+        if not idea_data:
+            raise HTTPException(404, "Idea not found")
+        idea = ShortformIdea.model_validate(idea_data)
+        clips = []
+        for index, part in enumerate(idea.parts, start=1):
+            clip = TimestampClip(
+                clip_id=f"clip_{uuid4().hex[:12]}",
+                start_ms=part.start_ms,
+                end_ms=part.end_ms,
+                title=f"{idea.title} (part {index})",
+                status=(
+                    "speakers_detected"
+                    if store.list("speaker_turn", project_id)
+                    else "media_ready"
+                ),
+                subtitle_style=project.subtitle_style,
+            )
+            store.save_clip(project_id, clip)
+            clips.append(clip)
+        return clips
 
     @app.post(
         "/api/projects/{project_id}/clips",
@@ -1421,14 +1509,13 @@ def create_app(
             update={"clip_id": clip_id}
         )
         store.save_job(job)
-        background.add_task(
-            run_transcription,
-            store,
-            project_id,
-            job.job_id,
-            model,
-            selected_clips,
-        )
+        async def _transcribe_then_shortform():
+            run_transcription(store, project_id, job.job_id, model, selected_clips)
+            job2 = Job.model_validate(store.get("job", job.job_id))
+            if job2.cancelled or job2.stage in {"cancelled", "failed"}:
+                return
+            await run_shortform_ideas_stage(store, project_id, job.job_id, selected_clips)
+        background.add_task(lambda: asyncio.run(_transcribe_then_shortform()))
         return job
 
     @app.post(
@@ -1453,6 +1540,7 @@ def create_app(
             "corrected_pass_1": 4,
             "corrected": 5,
             "translated": 6,
+            "shortform_ideas": 7,
         }
         selected_clips = processing_clips(project_id, clip_id)
         workflow_status = (
@@ -1461,8 +1549,8 @@ def create_app(
             else project.get("status", "")
         )
         rank = status_rank.get(workflow_status, 0)
-        if rank >= 6:
-            raise HTTPException(409, "The English transcript is already ready")
+        if rank >= 7:
+            raise HTTPException(409, "The shortform ideas are already ready")
         if any(
             job_is_active(item)
             for item in store.list("job", project_id)
@@ -1490,9 +1578,9 @@ def create_app(
                 "clip_id": clip_id,
                 "pipeline": True,
                 "pipeline_step": max(1, rank),
-                "pipeline_total": 5,
+                "pipeline_total": 6,
                 "pipeline_completed": False,
-                "overall_progress": max(0, rank - 1) / 5,
+                "overall_progress": max(0, rank - 1) / 6,
             }
         )
         store.save_job(job)
@@ -1591,6 +1679,7 @@ def create_app(
             "corrected_pass_1": 4,
             "corrected": 5,
             "translated": 6,
+            "shortform_ideas": 7,
         }
         workflow_status = (
             selected_clips[0].status
@@ -1615,13 +1704,28 @@ def create_app(
             update={"clip_id": clip_id}
         )
         store.save_job(job)
-        background.add_task(
-            lambda: asyncio.run(
-                run_language_stage(
+        if stage == "translating":
+            async def _translate_then_shortform():
+                await run_language_stage(
                     store, project_id, job.job_id, stage, selected_clips
                 )
+                job2 = Job.model_validate(store.get("job", job_id))
+                if job2.cancelled or job2.stage in {"cancelled", "failed"}:
+                    return
+                await run_shortform_ideas_stage(
+                    store, project_id, job.job_id, selected_clips
+                )
+            background.add_task(
+                lambda: asyncio.run(_translate_then_shortform())
             )
-        )
+        else:
+            background.add_task(
+                lambda: asyncio.run(
+                    run_language_stage(
+                        store, project_id, job.job_id, stage, selected_clips
+                    )
+                )
+            )
         return job
 
     @app.post("/api/projects/{project_id}/correct/pass-1", response_model=Job, status_code=202)
@@ -2323,18 +2427,44 @@ def create_app(
         return XAccountSettingsStatus(
             method=settings.method,
             configured=xpost.account_is_configured(settings),
+            verified_username=settings.verified_username,
         )
 
     @app.put("/api/settings/x", response_model=XAccountSettingsStatus)
     def update_x_settings(update: XAccountSettingsUpdate):
         settings = xpost.load_account_settings(store)
         data = update.model_dump(exclude_unset=True)
+        # Normalize + reject unusable values before storing anything. A masked
+        # placeholder (e.g. "**********") must never overwrite real keys.
+        credential_fields = (
+            "api_key", "api_secret", "access_token", "access_secret"
+        )
+        incoming = {
+            key: value for key, value in data.items() if key in credential_fields
+        }
+        for key, value in incoming.items():
+            try:
+                cleaned = xpost.validate_credential_value(
+                    key.replace("_", " "), value
+                )
+            except xpost.XAccountError as exc:
+                raise HTTPException(422, str(exc)) from exc
+            data[key] = cleaned
         for key, value in data.items():
             setattr(settings, key, value)
+        # If the API credentials were touched, prove they work against X
+        # before persisting them. This turns "configured" into "actually works".
+        if incoming and settings.method == "api":
+            try:
+                username = xapi.verify_credentials(settings)
+            except Exception as exc:  # noqa: BLE001
+                raise HTTPException(422, str(exc)) from exc
+            settings.verified_username = username
         xpost.save_account_settings(store, settings)
         return XAccountSettingsStatus(
             method=settings.method,
             configured=xpost.account_is_configured(settings),
+            verified_username=settings.verified_username,
         )
 
     # --- Scheduled posts ----------------------------------------------------

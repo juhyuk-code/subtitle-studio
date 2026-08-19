@@ -32,6 +32,9 @@ from .models import ScheduledPost, XAccountSettings
 
 API_BASE = "https://api.x.com"
 MEDIA_UPLOAD_URL = f"{API_BASE}/2/media/upload"
+MEDIA_UPLOAD_INIT_URL = f"{MEDIA_UPLOAD_URL}/initialize"
+MEDIA_UPLOAD_APPEND_URL = f"{MEDIA_UPLOAD_URL}/{{media_id}}/append"
+MEDIA_UPLOAD_FINALIZE_URL = f"{MEDIA_UPLOAD_URL}/{{media_id}}/finalize"
 TWEETS_URL = f"{API_BASE}/2/tweets"
 
 # Chunk size for the APPEND phase. 4 MiB keeps us well under request-size
@@ -56,9 +59,15 @@ def _oauth1_header(
     method: str,
     url: str,
     account: XAccountSettings,
-    extra_params: dict[str, str] | None = None,
+    query_params: dict[str, str] | None = None,
 ) -> str:
-    """Build an OAuth 1.0a Authorization header (HMAC-SHA1 signature)."""
+    """Build an OAuth 1.0a Authorization header (HMAC-SHA1 signature).
+
+    Per RFC 5849 the signature base string uses the URL WITHOUT its query
+    string, and every query parameter is folded into the sorted parameter
+    list. ``url`` must therefore be the clean base URL; pass query params via
+    ``query_params`` so they are both sent and signed.
+    """
     consumer_key = _secret(account.api_key)
     consumer_secret = _secret(account.api_secret)
     token = _secret(account.access_token)
@@ -72,7 +81,7 @@ def _oauth1_header(
         "oauth_token": token,
         "oauth_version": "1.0",
     }
-    signing_params = {**oauth_params, **(extra_params or {})}
+    signing_params = {**oauth_params, **(query_params or {})}
     param_string = "&".join(
         f"{_percent_encode(k)}={_percent_encode(v)}"
         for k, v in sorted(signing_params.items())
@@ -116,6 +125,59 @@ def _require_credentials(account: XAccountSettings) -> None:
         )
 
 
+def verify_credentials(account: XAccountSettings) -> str:
+    """Call the X API with the stored OAuth 1.0a keys.
+
+    Returns the authenticated username on success and raises XApiError with a
+    human-readable reason otherwise (bad keys, revoked token, wrong endpoint,
+    no network). Used to validate credentials before they are saved.
+    """
+    _require_credentials(account)
+    url = f"{API_BASE}/2/users/me"
+    query_params = {"user.fields": "username"}
+    with httpx.Client(timeout=30) as client:
+        response = client.get(
+            url,
+            params=query_params,
+            headers={
+                # Query params MUST be part of the OAuth 1.0a signature or X
+                # rejects the request with 401 even for valid keys.
+                "Authorization": _oauth1_header(
+                    "GET", url, account, query_params=query_params
+                )
+            },
+        )
+        if response.status_code == 401:
+            detail = ""
+            try:
+                errors = response.json().get("errors") or []
+                detail = errors[0].get("message", "") if errors else ""
+            except ValueError:
+                pass
+            raise XApiError(
+                "X rejected these credentials (HTTP 401 Unauthorized). "
+                "Check that all four values are the real OAuth 1.0a keys from "
+                "developer.x.com (not masked or regenerated), and that the app "
+                "permissions are set to Read and Write. "
+                + (f"X said: {detail}" if detail else "")
+            )
+        if response.status_code == 403:
+            raise XApiError(
+                "X refused the request (HTTP 403 Forbidden). The app likely "
+                "lacks the required access level; check the app permissions "
+                "in the developer portal."
+            )
+        if response.status_code >= 400:
+            raise XApiError(
+                f"Could not verify the X credentials (HTTP {response.status_code})."
+            )
+        data = response.json().get("data") or {}
+        username = data.get("username")
+        if not username:
+            raise XApiError("X verified the keys but did not return a username.")
+        return username
+
+
 # --- media upload ----------------------------------------------------------
 
 
@@ -129,56 +191,70 @@ def _media_category(path: Path) -> str:
 
 
 def _upload_media(client: httpx.Client, account: XAccountSettings, path: Path) -> str:
-    """Chunked upload: INIT -> APPEND*n -> FINALIZE -> STATUS. Returns media_id."""
+    """Chunked upload: INIT -> APPEND*n -> FINALIZE -> STATUS. Returns media_id.
+
+    The v2 chunked flow uses dedicated sub-paths (per the official OpenAPI
+    spec at docs.x.com/x-api/media/...):
+    - INIT:     POST /2/media/upload/initialize   JSON body
+                {total_bytes, media_type, media_category}
+    - APPEND:   POST /2/media/upload/{id}/append  multipart form:
+                "media" (binary file part) + "segment_index" field
+    - FINALIZE: POST /2/media/upload/{id}/finalize  no body
+    - STATUS:   GET  /2/media/upload?media_id={id}&command=STATUS
+
+    The legacy v1.1 convention (command=INIT/APPEND/FINALIZE as params on a
+    single /media/upload URL) does NOT work on v2: the one-shot
+    /2/media/upload endpoint expects a "media" field and rejects chunked
+    requests with "Missing media field in JSON".
+
+    Request bodies (JSON and multipart) are never part of the OAuth 1.0a
+    signature; only URL query parameters are signed.
+    """
     total_bytes = path.stat().st_size
     mime, _ = mimetypes.guess_type(str(path))
     mime = mime or "video/mp4"
 
-    # INIT (query params are part of the OAuth signature)
-    init_params = {
-        "command": "INIT",
-        "total_bytes": str(total_bytes),
-        "media_type": mime,
-        "media_category": _media_category(path),
-    }
+    # INIT — JSON body
     response = client.post(
-        MEDIA_UPLOAD_URL,
-        params=init_params,
+        MEDIA_UPLOAD_INIT_URL,
+        json={
+            "total_bytes": total_bytes,
+            "media_type": mime,
+            "media_category": _media_category(path),
+        },
         headers={
             "Authorization": _oauth1_header(
-                "POST", _url_with_query(MEDIA_UPLOAD_URL, init_params), account
+                "POST", MEDIA_UPLOAD_INIT_URL, account
             )
         },
     )
     _raise_for_status(response, "initialize media upload")
-    media_id = response.json().get("media_id_string") or response.json().get(
-        "data", {}
-    ).get("id")
+    payload = response.json()
+    media_id = (
+        (payload.get("data") or {}).get("id")
+        or payload.get("media_id_string")
+    )
     if not media_id:
         raise XApiError(f"X did not return a media id: {response.text}")
     media_id = str(media_id)
 
-    # APPEND
+    # APPEND — multipart: the chunk in the "media" file part
+    append_url = MEDIA_UPLOAD_APPEND_URL.format(media_id=media_id)
     with path.open("rb") as handle:
         segment_index = 0
         while True:
             chunk = handle.read(CHUNK_SIZE)
             if not chunk:
                 break
-            append_params = {
-                "command": "APPEND",
-                "media_id": media_id,
-                "segment_index": str(segment_index),
-            }
             response = client.post(
-                MEDIA_UPLOAD_URL,
-                params=append_params,
-                files={"media": chunk},
+                append_url,
+                data={"segment_index": str(segment_index)},
+                files={
+                    "media": ("chunk", chunk, "application/octet-stream")
+                },
                 headers={
                     "Authorization": _oauth1_header(
-                        "POST",
-                        _url_with_query(MEDIA_UPLOAD_URL, append_params),
-                        account,
+                        "POST", append_url, account
                     )
                 },
             )
@@ -186,15 +262,12 @@ def _upload_media(client: httpx.Client, account: XAccountSettings, path: Path) -
             _raise_for_status(response, f"append media chunk {segment_index}")
             segment_index += 1
 
-    # FINALIZE
-    finalize_params = {"command": "FINALIZE", "media_id": media_id}
+    # FINALIZE — no body; the media id is in the path
+    finalize_url = MEDIA_UPLOAD_FINALIZE_URL.format(media_id=media_id)
     response = client.post(
-        MEDIA_UPLOAD_URL,
-        params=finalize_params,
+        finalize_url,
         headers={
-            "Authorization": _oauth1_header(
-                "POST", _url_with_query(MEDIA_UPLOAD_URL, finalize_params), account
-            )
+            "Authorization": _oauth1_header("POST", finalize_url, account)
         },
     )
     _raise_for_status(response, "finalize media upload")
@@ -210,13 +283,14 @@ def _wait_for_media(
     deadline = time.time() + MEDIA_STATUS_TIMEOUT_S
     check_after = 1
     while time.time() < deadline:
+        # STATUS is a GET; its params go in the query string and ARE signed.
         status_params = {"command": "STATUS", "media_id": media_id}
         response = client.get(
             MEDIA_UPLOAD_URL,
             params=status_params,
             headers={
                 "Authorization": _oauth1_header(
-                    "GET", _url_with_query(MEDIA_UPLOAD_URL, status_params), account
+                    "GET", MEDIA_UPLOAD_URL, account, query_params=status_params
                 )
             },
         )
@@ -225,7 +299,13 @@ def _wait_for_media(
             time.sleep(2)
             return
         _raise_for_status(response, "check media status")
-        processing = response.json().get("processing_info") or {}
+        payload = response.json()
+        # v2 nests processing_info under "data"; v1.1 keeps it top-level.
+        processing = (
+            (payload.get("data") or {}).get("processing_info")
+            or payload.get("processing_info")
+            or {}
+        )
         state = processing.get("state", "succeeded")
         if state == "succeeded":
             return
@@ -271,11 +351,6 @@ def post_to_x(post: ScheduledPost, account: XAccountSettings) -> str:
 
 
 # --- helpers ---------------------------------------------------------------
-
-
-def _url_with_query(url: str, params: dict[str, str]) -> str:
-    query = "&".join(f"{k}={v}" for k, v in params.items())
-    return f"{url}?{query}"
 
 
 def _raise_for_status(response: httpx.Response, action: str) -> None:
