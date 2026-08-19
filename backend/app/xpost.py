@@ -17,6 +17,7 @@ publishes the post and returns the resulting post URL.
 
 from __future__ import annotations
 
+import json
 import threading
 import time
 from datetime import datetime, timezone
@@ -75,22 +76,78 @@ def load_account_settings(store: Store) -> XAccountSettings:
 
 
 def save_account_settings(store: Store, settings: XAccountSettings) -> None:
-    store.save_setting(_SETTINGS_KEY, settings.model_dump_json())
+    # Serialize the REAL secret values explicitly. SecretStr.model_dump_json()
+    # masks every secret as "**********" by default, which previously destroyed
+    # the user's keys on save.
+    data = {
+        "method": settings.method,
+        "api_key": _credential_value(settings.api_key) or None,
+        "api_secret": _credential_value(settings.api_secret) or None,
+        "access_token": _credential_value(settings.access_token) or None,
+        "access_secret": _credential_value(settings.access_secret) or None,
+    }
+    if getattr(settings, "verified_username", None):
+        data["verified_username"] = settings.verified_username
+    store.save_setting(_SETTINGS_KEY, json.dumps(data, ensure_ascii=False))
 
 
 def account_is_configured(settings: XAccountSettings) -> bool:
     if settings.method == "api":
-        return all(
-            [
-                settings.api_key,
-                settings.api_secret,
-                settings.access_token,
-                settings.access_secret,
-            ]
-        )
+        values = [
+            _credential_value(settings.api_key),
+            _credential_value(settings.api_secret),
+            _credential_value(settings.access_token),
+            _credential_value(settings.access_secret),
+        ]
+        return all(values) and not any(_looks_masked(v) for v in values)
     # browser method is "configured" once a session exists; that is reported
     # by the browser poster itself, so optimistically treat it as configured.
     return True
+
+
+class XAccountError(ValueError):
+    """Raised when saved X credentials are unusable (masked, empty, ...)."""
+
+
+_PLACEHOLDER_WORDS = (
+    "placeholder",
+    "your",
+    "example",
+    "redacted",
+    "masked",
+    "change me",
+    "xxxxxxxx",
+)
+
+
+def _credential_value(value) -> str:
+    if value is None:
+        return ""
+    raw = value.get_secret_value() if hasattr(value, "get_secret_value") else str(value)
+    return raw.strip()
+
+
+def _looks_masked(value: str) -> bool:
+    """True for values that are obviously not a real credential."""
+    # Uniform-character runs (e.g. "**********", "xxxxxxxx", "•••••••").
+    # Real keys are long; require 4+ chars so short test values pass.
+    if len(value) >= 4 and len(set(value)) == 1:
+        return True
+    lowered = value.lower()
+    return any(word in lowered for word in _PLACEHOLDER_WORDS)
+
+
+def validate_credential_value(field: str, value) -> str:
+    """Normalize one credential value; raise XAccountError if unusable."""
+    cleaned = _credential_value(value)
+    if not cleaned:
+        raise XAccountError(f"{field} is empty.")
+    if _looks_masked(cleaned):
+        raise XAccountError(
+            f"{field} looks like a masked placeholder, not a real key. "
+            "Paste the actual value from developer.x.com → Keys and tokens."
+        )
+    return cleaned
 
 
 def save_scheduled_post(store: Store, post: ScheduledPost) -> None:
@@ -151,12 +208,16 @@ def publish_due_posts(store: Store) -> int:
 
 
 def _publish_one(store: Store, post: ScheduledPost) -> bool:
+    account = load_account_settings(store)
+    if not account_is_configured(account):
+        # No usable credentials yet: leave the post pending so it publishes
+        # automatically once the user saves working keys. No wasted attempts.
+        return False
     post.status = "posting"
     post.attempts += 1
     post.error = None
     save_scheduled_post(store, post)
 
-    account = load_account_settings(store)
     poster = get_poster(post.method)
     try:
         if poster is None:

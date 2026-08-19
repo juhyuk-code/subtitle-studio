@@ -16,6 +16,7 @@ import type {
   ScheduledPostPatch,
   ScheduledPostStatus,
   Segment,
+  ShortformIdea,
   Speaker,
   SpeakerDetectionSettings,
   SubtitleStyle,
@@ -320,17 +321,31 @@ export const api = {
       { method: "POST" }
     ),
   updatePostCopy: (
-    projectId: string,
-    clipId: string,
-    patch: Pick<Partial<PostCopy>, "headline" | "body">
-  ) =>
-    request<PostCopy>(
-      `/api/projects/${projectId}/post-copies/${clipId}`,
-      {
-        method: "PATCH",
-        body: JSON.stringify(patch)
-      }
-    ),
+      projectId: string,
+      clipId: string,
+      patch: Pick<Partial<PostCopy>, "headline" | "body">
+    ) =>
+      request<PostCopy>(
+        `/api/projects/${projectId}/post-copies/${clipId}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify(patch)
+        }
+      ),
+    shortformIdeas: (projectId: string) =>
+      request<ShortformIdea[]>(
+        `/api/projects/${projectId}/shortform-ideas`
+      ),
+    generateShortformIdeas: (projectId: string) =>
+      request<ShortformIdea[]>(
+        `/api/projects/${projectId}/shortform-ideas/generate`,
+        { method: "POST" }
+      ),
+    deleteShortformIdea: (projectId: string, ideaId: string) =>
+      request<void>(
+        `/api/projects/${projectId}/shortform-ideas/${ideaId}`,
+        { method: "DELETE" }
+      ),
   createClip: (
     id: string,
     clip: {

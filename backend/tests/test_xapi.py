@@ -41,6 +41,61 @@ def test_oauth1_header_contains_signature_and_credentials():
     assert 'oauth_signature_method="HMAC-SHA1"' in header
 
 
+def test_oauth1_signature_changes_with_query_params():
+    """Query params must be folded into the signature base string. Two
+    signatures that differ only in signed query params must not be equal;
+    if the params are dropped from signing, both calls yield the same
+    signature and X rejects the request with 401 (the media-upload bug)."""
+    import hmac
+    import hashlib
+
+    base = xapi._oauth1_header(
+        "GET", "https://api.x.com/2/users/me", _account(),
+        query_params={"user.fields": "username"},
+    )
+    # Rebuild what the signature WOULD be without query params and compare
+    no_params = xapi._oauth1_header(
+        "GET", "https://api.x.com/2/users/me", _account()
+    )
+
+    def sig_of(header):
+        for part in header.split(", "):
+            if part.startswith("oauth_signature="):
+                return part.split("=", 1)[1]
+        return None
+
+    assert sig_of(base) != sig_of(no_params)
+
+
+def test_verify_credentials_sends_query_params_in_signature(monkeypatch):
+    """The /2/users/me verification call must sign its user.fields query
+    param; otherwise X returns 401 for perfectly valid keys."""
+    captured = {}
+
+    client = MagicMock()
+    client.__enter__ = MagicMock(return_value=client)
+    client.__exit__ = MagicMock(return_value=False)
+    client.get.return_value = _ok(
+        {"data": {"id": "1", "username": "someuser"}}
+    )
+
+    def fake_header(method, url, account, query_params=None):
+        captured["method"] = method
+        captured["url"] = url
+        captured["query_params"] = query_params
+        return "OAuth oauth_signature=\"fake\""
+
+    monkeypatch.setattr(xapi.httpx, "Client", lambda **kw: client)
+    monkeypatch.setattr(xapi, "_oauth1_header", fake_header)
+
+    username = xapi.verify_credentials(_account())
+    assert username == "someuser"
+    assert captured["url"].endswith("/2/users/me")
+    assert captured["query_params"] == {"user.fields": "username"}
+    # and the outgoing request carried the same params
+    assert client.get.call_args.kwargs["params"] == {"user.fields": "username"}
+
+
 def test_require_credentials_rejects_incomplete():
     incomplete = XAccountSettings(method="api", api_key="ck")
     with pytest.raises(xapi.XApiError, match="incomplete"):
@@ -96,6 +151,64 @@ def test_post_to_x_with_video_runs_full_chunked_flow(monkeypatch, tmp_path):
     assert client.post.call_count == 5
     tweet_body = client.post.call_args.kwargs["json"]
     assert tweet_body["media"]["media_ids"] == ["m123"]
+
+    # v2 chunked convention: dedicated sub-paths, no "command" field.
+    # INIT is JSON to /initialize; APPEND is multipart to /{id}/append;
+    # FINALIZE has no body at /{id}/finalize.
+    init_args = client.post.call_args_list[0]
+    append_args = client.post.call_args_list[1]
+    finalize_args = client.post.call_args_list[3]
+    assert init_args.args[0].endswith("/2/media/upload/initialize")
+    assert init_args.kwargs["json"]["total_bytes"] > 0
+    assert append_args.args[0].endswith("/m123/append")
+    assert "media" in append_args.kwargs["files"]
+    assert finalize_args.args[0].endswith("/m123/finalize")
+    assert "files" not in finalize_args.kwargs
+    assert "json" not in finalize_args.kwargs
+
+
+def test_upload_uses_v2_chunked_subpaths(monkeypatch, tmp_path):
+    """Regression: the v2 chunked upload uses dedicated sub-paths.
+    POSTing command=INIT multipart to the one-shot /2/media/upload URL
+    fails with 'Missing media field in JSON'."""
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"\x00" * 10)
+
+    client = MagicMock()
+    client.__enter__ = MagicMock(return_value=client)
+    client.__exit__ = MagicMock(return_value=False)
+    client.post.side_effect = [
+        _ok({"data": {"id": "m7"}}),          # INIT
+        _ok({}, status=204),                   # APPEND
+        _ok({"data": {"processing_info": {"state": "succeeded"}}}),  # FINALIZE
+    ]
+    client.get.return_value = _ok(
+        {"data": {"processing_info": {"state": "succeeded"}}}
+    )
+    monkeypatch.setattr(xapi.httpx, "Client", lambda **kw: client)
+
+    media_id = xapi._upload_media(client, _account(), video)
+    assert media_id == "m7"
+
+    init_args = client.post.call_args_list[0]
+    append_args = client.post.call_args_list[1]
+    finalize_args = client.post.call_args_list[2]
+    # INIT: JSON body, correct sub-path
+    assert init_args.args[0] == xapi.MEDIA_UPLOAD_INIT_URL
+    assert init_args.kwargs["json"] == {
+        "total_bytes": 10,
+        "media_type": "video/mp4",
+        "media_category": "tweet_video",
+    }
+    # APPEND: media_id in path, chunk in "media" part, index in form field
+    assert append_args.args[0] == xapi.MEDIA_UPLOAD_URL + "/m7/append"
+    assert append_args.kwargs["data"] == {"segment_index": "0"}
+    assert "media" in append_args.kwargs["files"]
+    # FINALIZE: id in path, no body at all
+    assert finalize_args.args[0] == xapi.MEDIA_UPLOAD_URL + "/m7/finalize"
+    assert "json" not in finalize_args.kwargs
+    assert "files" not in finalize_args.kwargs
+    assert "data" not in finalize_args.kwargs
 
 
 def test_post_to_x_missing_video_raises(monkeypatch):

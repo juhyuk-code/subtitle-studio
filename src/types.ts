@@ -66,7 +66,8 @@ export type WorkspaceSidebarTab =
   | "speakers"
   | "glossary"
   | "style"
-  | "post_copy";
+  | "post_copy"
+  | "shortform_ideas";
 
 export interface ProjectWorkspaceState {
   active_clip_id: string | null;
@@ -127,6 +128,25 @@ export interface PostCopy {
   body: string;
   generated_at: string;
   source_signature: string;
+  stale: boolean;
+}
+
+export interface ShortformPart {
+  segment_ids: string[];
+  start_ms: number;
+  end_ms: number;
+  note: string;
+}
+
+export interface ShortformIdea {
+  idea_id: string;
+  title: string;
+  hook: string;
+  rationale: string;
+  parts: ShortformPart[];
+  total_duration_ms: number;
+  source_signature: string;
+  generated_at: string;
   stale: boolean;
 }
 
@@ -261,6 +281,7 @@ export type XPostMethod = "api" | "browser";
 export interface XAccountSettingsStatus {
   method: XPostMethod;
   configured: boolean;
+  verified_username: string | null;
 }
 
 export interface XAccountSettingsUpdate {

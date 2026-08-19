@@ -258,6 +258,35 @@ class PostCopyPatch(BaseModel):
     body: str | None = Field(default=None, min_length=1, max_length=20_000)
 
 
+class ShortformPart(BaseModel):
+    """One contiguous piece of a shortform idea, resolved to timestamps."""
+
+    start_ms: int = Field(ge=0)
+    end_ms: int = Field(gt=0)
+    segment_ids: list[str] = Field(default_factory=list)
+    note: str = Field(default="", max_length=500)
+
+
+class ShortformIdea(BaseModel):
+    """A shortform video concept assembled from one or more transcript parts.
+
+    Parts are in CUT order and may come from anywhere in the video; they do not
+    need to be adjacent in the source timeline.
+    """
+
+    idea_id: str = Field(
+        default_factory=lambda: f"idea_{uuid4().hex[:10]}"
+    )
+    title: str = Field(min_length=1, max_length=200)
+    hook: str = Field(default="", max_length=500)
+    rationale: str = Field(default="", max_length=2_000)
+    parts: list[ShortformPart] = Field(min_length=1)
+    total_duration_ms: int = Field(default=0, ge=0)
+    generated_at: str
+    source_signature: str = ""
+    stale: bool = False
+
+
 class CaptionGenerationRequest(BaseModel):
     language: Literal["ko", "en"] = "en"
     max_words_per_line: int = Field(ge=2, le=40)
@@ -520,11 +549,14 @@ ScheduledPostStatus = Literal[
 class XAccountSettings(BaseModel):
     """Credentials/connection state for posting. Stored server-side only."""
 
+    model_config = ConfigDict(extra="ignore")
+
     method: PostMethod = "api"
     api_key: SecretStr | None = None
     api_secret: SecretStr | None = None
     access_token: SecretStr | None = None
     access_secret: SecretStr | None = None
+    verified_username: str | None = Field(default=None, max_length=80)
 
 
 class XAccountSettingsUpdate(BaseModel):
@@ -538,6 +570,7 @@ class XAccountSettingsUpdate(BaseModel):
 class XAccountSettingsStatus(BaseModel):
     method: PostMethod
     configured: bool
+    verified_username: str | None = None
 
 
 class ScheduledPostCreate(BaseModel):

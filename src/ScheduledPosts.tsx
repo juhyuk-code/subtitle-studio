@@ -210,7 +210,9 @@ export function ScheduledPostsPanel({
             <h2>{scopeTitle ? `${scopeTitle} — posts` : "Scheduled posts"}</h2>
             <p>
               {xSettings?.configured
-                ? "X account connected"
+                ? xSettings.verified_username
+                  ? `Connected as @${xSettings.verified_username}`
+                  : "X account connected"
                 : "Connect your X account to start posting"}
             </p>
           </div>
@@ -500,23 +502,28 @@ function ConnectXModal({
   const [accessSecret, setAccessSecret] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [connectedAs, setConnectedAs] = useState<string | null>(null);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     setSaving(true);
     setError(null);
     try {
-      await api.saveXSettings({
+      const result = await api.saveXSettings({
         method: "api",
         api_key: apiKey,
         api_secret: apiSecret,
         access_token: accessToken,
         access_secret: accessSecret
       });
-      await onSaved();
+      // Show explicit success feedback BEFORE closing so the user can see
+      // that the keys were verified against X.
+      setConnectedAs(result.verified_username ?? "your account");
+      window.setTimeout(async () => {
+        await onSaved();
+      }, 1600);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not save.");
-    } finally {
       setSaving(false);
     }
   }
@@ -531,6 +538,20 @@ function ConnectXModal({
           <strong>OAuth 1.0a</strong> keys below (not the Bearer Token).
         </p>
         {error ? <div className="inline-error">{error}</div> : null}
+        {connectedAs ? (
+          <div
+            style={{
+              padding: "10px 12px",
+              borderRadius: 8,
+              background: "color-mix(in srgb, #22c55e 18%, transparent)",
+              border: "1px solid color-mix(in srgb, #22c55e 45%, transparent)",
+              color: "inherit",
+              fontWeight: 600
+            }}
+          >
+            ✓ Connected as @{connectedAs}
+          </div>
+        ) : null}
         <label>
           Consumer Key (API Key)
           <input
@@ -582,8 +603,16 @@ function ConnectXModal({
           <button type="button" className="ghost" onClick={onClose}>
             Cancel
           </button>
-          <button type="submit" className="primary" disabled={saving}>
-            {saving ? "Saving…" : "Save & connect"}
+          <button
+            type="submit"
+            className="primary"
+            disabled={saving || connectedAs !== null}
+          >
+            {saving
+              ? "Saving…"
+              : connectedAs !== null
+                ? "Connected"
+                : "Save & connect"}
           </button>
         </div>
       </form>
