@@ -6,6 +6,7 @@ import {
   FilmSlateIcon,
   PaperPlaneTiltIcon,
   PencilSimpleIcon,
+  PlayCircleIcon,
   PlusIcon,
   TrashIcon,
   WarningCircleIcon,
@@ -21,6 +22,7 @@ import {
 } from "react";
 import { api } from "./api";
 import type {
+  Job,
   PostCopy,
   Project,
   ScheduledPost,
@@ -34,6 +36,7 @@ type EnrichedPost = {
   clip: TimestampClip | null;
   postCopy: PostCopy | null;
   videoUrl: string | null;
+  thumbnailUrl: string | null;
 };
 
 function formatDateTime(value: string): string {
@@ -94,35 +97,54 @@ export function ScheduledPostsPanel({
   const enrich = useCallback(
     async (allPosts: ScheduledPost[], allProjects: Project[]) => {
       const projectById = new Map(allProjects.map((p) => [p.project_id, p]));
-      return Promise.all(
-        allPosts.map(async (post): Promise<EnrichedPost> => {
-          const project = projectById.get(post.project_id) ?? null;
-          let clip: TimestampClip | null = null;
-          let postCopy: PostCopy | null = null;
-          let videoUrl: string | null = null;
-          try {
-            const [clips, copies, exports] = await Promise.all([
-              api.clips(post.project_id).catch(() => [] as TimestampClip[]),
-              api.postCopies(post.project_id).catch(() => [] as PostCopy[]),
-              api.videoExports(post.project_id).catch(() => [])
-            ]);
-            clip = clips.find((c) => c.clip_id === post.clip_id) ?? null;
-            postCopy = copies.find((c) => c.clip_id === post.clip_id) ?? null;
-            for (const job of exports) {
-              const match = job.outputs.find(
-                (o) => o.kind === "video" && (!post.clip_id || o.clip_id === post.clip_id)
-              );
-              if (match) {
-                videoUrl = match.output_url;
-                break;
-              }
-            }
-          } catch {
-            // enrichment is best-effort; the post row still renders
-          }
-          return { post, project, clip, postCopy, videoUrl };
+      // Fetch each project's clips/copies/exports ONCE and share across all
+      // posts from that project (avoids N+1 API calls per post).
+      const projectIds = [...new Set(allPosts.map((p) => p.project_id))];
+      const projectData = new Map<
+        string,
+        {
+          clips: TimestampClip[];
+          copies: PostCopy[];
+          exports: Job[];
+        }
+      >();
+      await Promise.all(
+        projectIds.map(async (pid) => {
+          const [clips, copies, exports] = await Promise.all([
+            api.clips(pid).catch(() => [] as TimestampClip[]),
+            api.postCopies(pid).catch(() => [] as PostCopy[]),
+            api.videoExports(pid).catch(() => [] as Job[])
+          ]);
+          projectData.set(pid, { clips, copies, exports });
         })
       );
+      return allPosts.map((post): EnrichedPost => {
+        const project = projectById.get(post.project_id) ?? null;
+        const data = projectData.get(post.project_id);
+        let clip: TimestampClip | null = null;
+        let postCopy: PostCopy | null = null;
+        let videoUrl: string | null = null;
+        let thumbnailUrl: string | null = null;
+        if (data) {
+          clip = data.clips.find((c) => c.clip_id === post.clip_id) ?? null;
+          postCopy = data.copies.find((c) => c.clip_id === post.clip_id) ?? null;
+          for (const job of data.exports) {
+            const match = job.outputs.find(
+              (o) =>
+                o.kind === "video" &&
+                (!post.clip_id || o.clip_id === post.clip_id)
+            );
+            if (match) {
+              videoUrl = match.output_url;
+              thumbnailUrl = match.output_url
+                ? `${match.output_url}/thumbnail`
+                : null;
+              break;
+            }
+          }
+        }
+        return { post, project, clip, postCopy, videoUrl, thumbnailUrl };
+      });
     },
     []
   );
@@ -333,11 +355,12 @@ function PostCard({
   onDelete: (post: ScheduledPost) => void;
   onChanged: () => Promise<void>;
 }) {
-  const { post, clip, videoUrl } = item;
+  const { post, clip, videoUrl, thumbnailUrl } = item;
   const meta = statusMeta(post.status);
   const editable = post.status === "pending";
   const [expanded, setExpanded] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [playing, setPlaying] = useState(false);
   const [draftText, setDraftText] = useState(post.text);
   const [draftWhen, setDraftWhen] = useState(
     toLocalInputValue(post.scheduled_at)
@@ -381,7 +404,28 @@ function PostCard({
     <article className={`post-card ${meta.className}`}>
       <div className="post-media">
         {videoUrl ? (
-          <video src={videoUrl} controls preload="metadata" />
+          playing ? (
+            <video
+              src={videoUrl}
+              controls
+              autoPlay
+              preload="none"
+              poster={thumbnailUrl ?? undefined}
+            />
+          ) : (
+            <button
+              className="post-media-poster"
+              onClick={() => setPlaying(true)}
+              title="Play clip"
+            >
+              {thumbnailUrl ? (
+                <img src={thumbnailUrl} alt="" loading="lazy" />
+              ) : null}
+              <span className="post-media-play">
+                <PlayCircleIcon size={44} weight="fill" />
+              </span>
+            </button>
+          )
         ) : (
           <div className="post-media-placeholder">
             <FilmSlateIcon size={28} />

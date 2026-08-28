@@ -218,6 +218,10 @@ Avoid corporate language, vague summaries, exaggerated clickbait, repetitive quo
 
 Determine the actual subject of the clip before choosing quotes. If the clip is primarily about open-source models, the post must explain why open-source models matter. Do not let a provocative side comment overshadow the central argument.
 
+## Korea keyword rule
+
+Include the keyword "Korea" ONLY when the clip's transcript itself is genuinely about Korea — e.g. it explicitly discusses Korean markets, Korean companies, Korean regulation, Korean tax/legal treatment, Korean investors, Korean society, or Korean civil service. Decide based SOLELY on what the transcript says, never on the fact that the podcast happens to be Korean and never on inference. If the transcript does not explicitly tie the discussion to Korea (e.g. it is about global platforms, generic economic arguments, or universal legal advice), do NOT include the keyword even though the speakers are Korean. When you do include it, use it naturally in the headline or a quote (e.g. "Korea's market…", "in Korea…", "Korean investors…") so the post reads as if a human wrote it. This is a hard rule: transcript evidence required, no defaulting to Korea.
+
 ## Final quality check
 
 Before answering, verify:
@@ -229,6 +233,7 @@ Before answering, verify:
 * Do the quotes collectively explain why the argument matters?
 * Is the strongest quote placed near the end?
 * Are there no em dashes (—) or en dashes (–) anywhere in the headline or body?
+* If the clip's transcript is genuinely about Korea (not merely a Korean podcast), does the post include the keyword "Korea" naturally? If the transcript does not explicitly tie the topic to Korea, did you avoid forcing the keyword?
 * Can the post be understood without additional context?
 
 ## Output format (required by the app)
@@ -1934,12 +1939,37 @@ async def call_openrouter(
                         "messages": messages,
                     },
                 )
+                # 429 = rate limited. With parallel batches (see
+                # _llm_concurrency) this becomes more likely; back off and
+                # retry the same request instead of failing the whole job.
+                if response.status_code == 429:
+                    if attempt == 1:
+                        # Give up: surface the real 429 so the caller sees a
+                        # proper rate-limit error instead of a silent None.
+                        response.raise_for_status()
+                    wait = 3 * (attempt + 1)
+                    logger.warning(
+                        "OpenRouter rate limited on %s; backing off %ss",
+                        stage,
+                        wait,
+                    )
+                    await asyncio.sleep(wait)
+                    continue
                 response.raise_for_status()
                 content = ""
                 try:
-                    content = response.json()["choices"][0]["message"]["content"]
+                    content = (
+                        response.json()["choices"][0]["message"].get("content")
+                        or ""
+                    )
                     return _extract_json(content)
-                except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+                except (
+                    json.JSONDecodeError,
+                    KeyError,
+                    TypeError,
+                    ValueError,
+                    AttributeError,
+                ) as exc:
                     logger.warning(
                         "OpenRouter returned invalid JSON for %s on attempt %s",
                         stage,
@@ -2417,6 +2447,15 @@ def _language_rows(
 ) -> list[dict[str, Any]]:
     key = "translations" if stage == "translating" else "corrected_segments"
     rows = result.get(key)
+    # Tolerate the model returning the key missing or wrapped oddly: fall
+    # back to scanning for the first list-of-dicts value in the response.
+    if not isinstance(rows, list):
+        for value in result.values():
+            if isinstance(value, list) and value and all(
+                isinstance(item, dict) for item in value
+            ):
+                rows = value
+                break
     if not isinstance(rows, list) or not all(
         isinstance(row, dict) for row in rows
     ):
@@ -2447,65 +2486,73 @@ async def run_language_stage(
             item["segment_id"]: Segment.model_validate(item)
             for item in store.list("segment", project_id)
         }
+        stage_field = {
+            "correcting_pass_1": "pass_1_korean",
+            "correcting_pass_2": "pass_2_korean",
+            "translating": "english",
+        }[stage]
         batches = _dialogue_batches(payload["segments"])
-        target_count = sum(
-            not segments[item["segment_id"]].locked
-            for batch in batches
-            for item in batch
-            if item.get("segment_id") in segments
-        )
-        completed_count = 0
+
+        # Keep only segments that still need this stage. Segments are
+        # checkpointed per-segment, so a crashed run resumes where it stopped
+        # instead of redoing the whole stage.
+        pending: list[tuple[list[dict[str, Any]], list[str]]] = []
         for batch in batches:
-            _checkpoint_job(store, job)
             required_ids = [
                 item["segment_id"]
                 for item in batch
                 if item.get("segment_id") in segments
                 and not segments[item["segment_id"]].locked
+                and not getattr(segments[item["segment_id"]], stage_field)
             ]
-            if not required_ids:
-                continue
-            batch_payload = {
-                **payload,
-                "segments": batch,
-                "required_segment_ids": required_ids,
-            }
-            result = await call_openrouter(
-                store, stage, prompts[stage], batch_payload
-            )
-            rows = _language_rows(result, stage)
-            row_by_id = {
-                row.get("segment_id"): row
-                for row in rows
-                if row.get("segment_id") in required_ids
-            }
-            missing_ids = [
-                segment_id
-                for segment_id in required_ids
-                if segment_id not in row_by_id
-            ]
-            if missing_ids:
-                retry_payload = {
+            if required_ids:
+                pending.append((batch, required_ids))
+
+        target_count = sum(len(required_ids) for _, required_ids in pending)
+        completed_count = 0
+        concurrency = _llm_concurrency()
+
+        async def process_batch(
+            batch: list[dict[str, Any]],
+            required_ids: list[str],
+        ) -> None:
+            nonlocal completed_count
+            row_by_id: dict[str, dict[str, Any]] = {}
+            retry_items = batch
+            for attempt in range(3):
+                batch_payload = {
                     **payload,
-                    "segments": [
-                        item
-                        for item in batch
-                        if item.get("segment_id") in missing_ids
-                    ],
-                    "required_segment_ids": missing_ids,
-                    "repair_instruction": (
+                    "segments": retry_items,
+                    "required_segment_ids": required_ids,
+                }
+                if attempt > 0:
+                    batch_payload["repair_instruction"] = (
                         "Return exactly one valid row for every required "
                         "segment ID. Do not omit any ID."
-                    ),
-                }
-                retry_result = await call_openrouter(
-                    store, stage, prompts[stage], retry_payload
-                )
+                    )
+                try:
+                    result = await call_openrouter(
+                        store, stage, prompts[stage], batch_payload
+                    )
+                    rows = _language_rows(result, stage)
+                except Exception as exc:
+                    # One flaky batch must not kill the whole multi-minute
+                    # stage. Log it, skip this batch's remaining segments,
+                    # and let the next batch proceed.
+                    logger.warning(
+                        "stage %s batch failed (attempt %d): %s",
+                        stage,
+                        attempt + 1,
+                        exc,
+                    )
+                    row_by_id = {}
+                    retry_items = []
+                    break
                 row_by_id.update(
                     {
                         row.get("segment_id"): row
-                        for row in _language_rows(retry_result, stage)
-                        if row.get("segment_id") in missing_ids
+                        for row in rows
+                        if row.get("segment_id") in required_ids
                     }
                 )
                 missing_ids = [
@@ -2513,55 +2560,85 @@ async def run_language_stage(
                     for segment_id in required_ids
                     if segment_id not in row_by_id
                 ]
+                if not missing_ids:
+                    break
+                retry_items = [
+                    item
+                    for item in batch
+                    if item.get("segment_id") in missing_ids
+                ]
+            missing_ids = [
+                segment_id
+                for segment_id in required_ids
+                if segment_id not in row_by_id
+            ]
             if missing_ids:
-                raise RuntimeError(
-                    "The language model omitted "
-                    f"{len(missing_ids)} transcript segment(s) after retry. "
-                    "No incomplete stage was marked as finished."
+                # Do not kill the whole multi-minute stage for a few stubborn
+                # segments: keep existing values, flag them, and move on.
+                logger.warning(
+                    "stage %s: %d segment(s) unresolved after retries; "
+                    "keeping existing values",
+                    stage,
+                    len(missing_ids),
                 )
             for segment_id in required_ids:
-                _checkpoint_job(store, job)
-                row = row_by_id[segment_id]
                 segment = segments[segment_id]
-                if stage == "translating":
-                    segment.english = row.get("english", segment.english)
-                    segment.warnings = row.get("warnings", [])
-                    segment.status = (
-                        "warning" if segment.warnings else "translated"
-                    )
+                if segment_id in row_by_id:
+                    row = row_by_id[segment_id]
+                    if stage == "translating":
+                        segment.english = row.get("english", segment.english)
+                        segment.warnings = row.get("warnings", [])
+                        segment.status = (
+                            "warning" if segment.warnings else "translated"
+                        )
+                    else:
+                        setattr(
+                            segment,
+                            stage_field,
+                            row.get("corrected_korean", segment.raw_korean),
+                        )
+                        if (
+                            stage == "correcting_pass_2"
+                            and not segment.pass_2_korean
+                        ):
+                            segment.pass_2_korean = segment.pass_1_korean
+                        segment.change_reasons = row.get("change_reason", [])
+                        segment.warnings = [
+                            f"Uncertain: {phrase}"
+                            for phrase in row.get("uncertain_phrases", [])
+                        ]
+                        segment.confidence = row.get(
+                            "confidence", segment.confidence
+                        )
+                        segment.status = (
+                            "warning" if segment.warnings else "corrected"
+                        )
                 else:
-                    field = (
-                        "pass_1_korean"
-                        if stage == "correcting_pass_1"
-                        else "pass_2_korean"
-                    )
-                    setattr(
-                        segment,
-                        field,
-                        row.get("corrected_korean", segment.raw_korean),
-                    )
-                    if (
-                        stage == "correcting_pass_2"
-                        and not segment.pass_2_korean
-                    ):
-                        segment.pass_2_korean = segment.pass_1_korean
-                    segment.change_reasons = row.get("change_reason", [])
                     segment.warnings = [
-                        f"Uncertain: {phrase}"
-                        for phrase in row.get("uncertain_phrases", [])
+                        *segment.warnings,
+                        "Uncertain: left unchanged after model retries",
                     ]
-                    segment.confidence = row.get(
-                        "confidence", segment.confidence
-                    )
-                    segment.status = (
-                        "warning" if segment.warnings else "corrected"
-                    )
+                    segment.status = "warning"
                 store.save_segment(project_id, segment)
                 completed_count += 1
                 job.progress = 0.1 + 0.9 * completed_count / max(
                     1, target_count
                 )
                 _checkpoint_job(store, job)
+
+        if pending:
+            semaphore = asyncio.Semaphore(concurrency)
+
+            async def guarded(
+                batch: list[dict[str, Any]],
+                required_ids: list[str],
+            ) -> None:
+                async with semaphore:
+                    await process_batch(batch, required_ids)
+
+            await asyncio.gather(
+                *(guarded(batch, rids) for batch, rids in pending)
+            )
         status = {
             "correcting_pass_1": "corrected_pass_1",
             "correcting_pass_2": "corrected",
@@ -2578,9 +2655,29 @@ async def run_language_stage(
     except JobCancelled:
         return
     except Exception as exc:
-        job.stage, job.error = "failed", str(exc)
+        logger.exception("Language stage %s failed", stage)
+        job.stage, job.error = "failed", (
+            f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+        )
         job.paused = False
         store.save_job(job)
+
+
+def _llm_concurrency() -> int:
+    """How many independent LLM batches to run in parallel.
+
+    Tune via SUBTITLE_STUDIO_LLM_CONCURRENCY (default 4). Batches are
+    independent OpenRouter calls; running several at once cuts the wall
+    time of a large transcript's correction/translation passes
+    dramatically. Capped to keep rate limits happy.
+    """
+    try:
+        return max(
+            1,
+            min(8, int(os.environ.get("SUBTITLE_STUDIO_LLM_CONCURRENCY", "4"))),
+        )
+    except ValueError:
+        return 4
 
 
 async def run_english_pipeline(
@@ -2591,10 +2688,16 @@ async def run_english_pipeline(
     expected_speaker_count: int | None = None,
 ) -> None:
     project = Project.model_validate(store.get("project", project_id))
-    rank = WORKFLOW_RANK.get(
-        clips[0].status if clips and len(clips) == 1 else project.status,
-        0,
-    )
+    # When specific clips are being processed, start from the LEAST-advanced
+    # clip, not the project status. A single fully-processed clip must never
+    # make the whole run skip transcription for brand-new clips.
+    if clips:
+        rank = min(
+            (WORKFLOW_RANK.get(clip.status, 0) for clip in clips),
+            default=0,
+        )
+    else:
+        rank = WORKFLOW_RANK.get(project.status, 0)
     steps = [
         (
             1,
@@ -2689,9 +2792,12 @@ async def run_english_pipeline(
     except JobCancelled:
         return
     except Exception as exc:
+        logger.exception("English pipeline failed")
         failed = Job.model_validate(store.get("job", job_id))
         failed.stage = "failed"
-        failed.error = str(exc)
+        failed.error = (
+            f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+        )
         failed.paused = False
         store.save_job(failed)
 

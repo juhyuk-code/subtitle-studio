@@ -249,6 +249,8 @@ class PostCopy(BaseModel):
     generated_at: str
     source_signature: str
     stale: bool = False
+    viral_score: int | None = Field(default=None, ge=0, le=100)
+    viral_rationale: str | None = Field(default=None, max_length=2000)
 
 
 class PostCopyPatch(BaseModel):

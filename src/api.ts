@@ -489,5 +489,11 @@ export const api = {
   publishDueScheduledPosts: () =>
     request<{ posted: number }>("/api/scheduled-posts/publish-due", {
       method: "POST"
-    })
+    }),
+  // Ask the Hermes agent to run the full clipping + posting process.
+  requestFullClip: (projectId: string) =>
+    request<{ status: string; message: string }>(
+      `/api/agent/full-clip-request?project_id=${encodeURIComponent(projectId)}`,
+      { method: "POST" }
+    )
 };
