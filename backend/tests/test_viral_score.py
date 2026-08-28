@@ -126,19 +126,22 @@ def test_viral_score_endpoint_returns_ranked_rows(tmp_path):
 # --- 10-minute guard ---------------------------------------------------------
 
 
-def test_create_post_rejects_video_over_10_minutes(tmp_path):
+def test_create_post_rejects_video_over_10_minutes(tmp_path, monkeypatch):
+    from backend.app.main import media_duration_ms as real_duration
+
     store = Store(tmp_path)
     project = Project.create(ProjectCreate(name="P"))
     store.save_project(project)
     client = TestClient(create_app(tmp_path))
 
-    # Create a long dummy video (over 10 min). A tiny valid mp4 won't be 10 min,
-    # so simulate via a stub that pretends the export exists. Instead, verify the
-    # guard trips when given an explicit long video_path.
     fake_video = tmp_path / "long.mp4"
-    # A 10.5-minute file is hard to fabricate as a real mp4; we instead check the
-    # 422 path using a file that ffprobe rejects (media_duration_ms may raise).
-    fake_video.write_bytes(b"not a video")
+    fake_video.write_bytes(b"fake")
+
+    # Stub the duration probe so the test doesn't need ffprobe on the runner.
+    monkeypatch.setattr(
+        "backend.app.main.media_duration_ms",
+        lambda _path: 11 * 60 * 1000,  # 11 minutes -> over the 10-min limit
+    )
 
     response = client.post(
         "/api/scheduled-posts",
@@ -150,7 +153,61 @@ def test_create_post_rejects_video_over_10_minutes(tmp_path):
             "video_path": str(fake_video),
         },
     )
-    # Either the duration probe succeeds and we get 422 for >10min, or the probe
-    # fails to parse and the request proceeds (no crash). A garbage file should
-    # not crash the server either way.
-    assert response.status_code in (201, 422)
+    assert response.status_code == 422
+    assert "10-minute" in response.json()["detail"]
+
+
+def test_create_post_allows_short_video(tmp_path, monkeypatch):
+    store = Store(tmp_path)
+    project = Project.create(ProjectCreate(name="P"))
+    store.save_project(project)
+    client = TestClient(create_app(tmp_path))
+
+    fake_video = tmp_path / "short.mp4"
+    fake_video.write_bytes(b"fake")
+
+    monkeypatch.setattr(
+        "backend.app.main.media_duration_ms",
+        lambda _path: 3 * 60 * 1000,  # 3 minutes
+    )
+
+    response = client.post(
+        "/api/scheduled-posts",
+        json={
+            "project_id": project.project_id,
+            "clip_id": None,
+            "text": "hello",
+            "scheduled_at": "2026-12-31T12:00:00+00:00",
+            "video_path": str(fake_video),
+        },
+    )
+    assert response.status_code == 201
+    assert response.json()["status"] == "pending"
+
+
+def test_create_post_tolerates_missing_ffprobe(tmp_path, monkeypatch):
+    """If ffprobe is unavailable, do not crash the endpoint; allow the post."""
+    store = Store(tmp_path)
+    project = Project.create(ProjectCreate(name="P"))
+    store.save_project(project)
+    client = TestClient(create_app(tmp_path))
+
+    fake_video = tmp_path / "unknown.mp4"
+    fake_video.write_bytes(b"fake")
+
+    monkeypatch.setattr(
+        "backend.app.main.media_duration_ms",
+        lambda _path: (_ for _ in ()).throw(FileNotFoundError("ffprobe")),
+    )
+
+    response = client.post(
+        "/api/scheduled-posts",
+        json={
+            "project_id": project.project_id,
+            "clip_id": None,
+            "text": "hello",
+            "scheduled_at": "2026-12-31T12:00:00+00:00",
+            "video_path": str(fake_video),
+        },
+    )
+    assert response.status_code == 201

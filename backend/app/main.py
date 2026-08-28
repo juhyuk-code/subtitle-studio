@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import json
+import logging
 import os
 import shutil
 import subprocess
@@ -9,6 +10,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
+
+logger = logging.getLogger(__name__)
 
 from fastapi import (
     BackgroundTasks,
@@ -2596,8 +2599,14 @@ def create_app(
         # X (Twitter) rejects videos longer than 10 minutes (403). Refuse to
         # schedule them up front instead of failing silently at post time.
         if video_path and Path(video_path).exists():
-            duration_ms = media_duration_ms(Path(video_path))
-            if duration_ms > 10 * 60 * 1000:
+            try:
+                duration_ms = media_duration_ms(Path(video_path))
+            except Exception as exc:  # noqa: BLE001 - ffprobe may be unavailable
+                logger.warning(
+                    "Could not measure video duration for %s: %s", video_path, exc
+                )
+                duration_ms = None
+            if duration_ms and duration_ms > 10 * 60 * 1000:
                 raise HTTPException(
                     422,
                     f"Video is {duration_ms / 60_000:.1f} minutes, longer than "
