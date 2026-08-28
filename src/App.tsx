@@ -1701,6 +1701,9 @@ function Editor({
   const [markers, setMarkers] = useState<NavigationMarker[]>([]);
   const [postCopies, setPostCopies] = useState<PostCopy[]>([]);
   const [shortformIdeas, setShortformIdeas] = useState<ShortformIdea[]>([]);
+  const [shortformGenerating, setShortformGenerating] = useState(false);
+  const [shortformUnsaved, setShortformUnsaved] = useState(false);
+  const [shortformSaving, setShortformSaving] = useState(false);
   const [selectedShortformIdeaId, setSelectedShortformIdeaId] = useState<
     string | null
   >(null);
@@ -1718,6 +1721,8 @@ function Editor({
   const [mediaPreparation, setMediaPreparation] =
     useState<MediaPreparation | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [fullClipRequested, setFullClipRequested] = useState(false);
+  const [fullClipMessage, setFullClipMessage] = useState<string | null>(null);
   const [playing, setPlaying] = useState(false);
   const [playbackRate, setPlaybackRate] = useState(1);
   const [currentMs, setCurrentMs] = useState(0);
@@ -2643,6 +2648,32 @@ function Editor({
     } finally {
       setMediaPreparation(null);
       event.target.value = "";
+    }
+  }
+
+  async function generateShortformIdeas() {
+    setError(null);
+    setShortformGenerating(true);
+    try {
+      const ideas = await api.generateShortformIdeas(projectId);
+      setShortformIdeas(ideas);
+      setShortformUnsaved(true);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Failed to generate ideas.");
+    } finally {
+      setShortformGenerating(false);
+    }
+  }
+
+  async function saveShortformIdeas() {
+    setShortformSaving(true);
+    try {
+      await refresh();
+      setShortformUnsaved(false);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Failed to save ideas.");
+    } finally {
+      setShortformSaving(false);
     }
   }
 
@@ -3586,6 +3617,23 @@ function Editor({
             )}
             {preparationCopy?.title ?? (styleSaving ? "Saving style" : "Saved locally")}
           </span>
+          <button
+            type="button"
+            className="primary"
+            disabled={!!busy || !!mediaPreparation}
+            onClick={async () => {
+              setError(null);
+              try {
+                await refresh();
+                setShortformUnsaved(false);
+              } catch (reason) {
+                setError(reason instanceof Error ? reason.message : "Save failed.");
+              }
+            }}
+            style={{ fontSize: "12px", padding: "5px 14px" }}
+          >
+            Save
+          </button>
           {project.media_name ? (
             <button
               type="button"
@@ -3605,6 +3653,30 @@ function Editor({
             title="App settings"
           >
             <GearSixIcon size={16} />
+          </button>
+          <button
+            type="button"
+            className="primary full-clip-button"
+            disabled={!!busy || !!mediaPreparation || fullClipRequested}
+            onClick={async () => {
+              setError(null);
+              setFullClipMessage(null);
+              try {
+                const result = await api.requestFullClip(projectId);
+                setFullClipRequested(true);
+                setFullClipMessage(result.message);
+              } catch (reason) {
+                setError(
+                  reason instanceof Error
+                    ? reason.message
+                    : "Could not request full clip."
+                );
+              }
+            }}
+            title="Ask the agent to clip everything, caption, and schedule posts for this project"
+          >
+            <SparkleIcon size={16} weight="fill" />
+            {fullClipRequested ? "Requested" : "Full clip + post"}
           </button>
           <button
             type="button"
@@ -4093,6 +4165,24 @@ function Editor({
             />
           ) : sidebarTab === "shortform_ideas" ? (
             <div className="shortform-ideas-panel">
+              <div
+                style={{
+                  padding: "8px 12px",
+                  borderBottom: "1px solid var(--border)",
+                  display: "flex",
+                  gap: 8,
+                  alignItems: "center",
+                }}
+              >
+                <button
+                  className="primary"
+                  style={{ flex: 1, fontSize: "12px", padding: "6px 10px" }}
+                  disabled={shortformGenerating}
+                  onClick={generateShortformIdeas}
+                >
+                  {shortformGenerating ? "생성 중..." : "숏폼 아이디어 생성"}
+                </button>
+              </div>
               <ShortformIdeasList
                 ideas={shortformIdeas}
                 selectedId={selectedShortformIdeaId}
@@ -4159,6 +4249,12 @@ function Editor({
 
         <main className="workbench">
           {error || job?.error ? <InlineError message={error ?? job?.error ?? ""} /> : null}
+          {fullClipMessage ? (
+            <div className="inline-notice" role="status">
+              <SparkleIcon size={16} weight="fill" />
+              <span>{fullClipMessage}</span>
+            </div>
+          ) : null}
           {selectedShortformIdeaId
             ? (() => {
                 const idea = shortformIdeas.find(

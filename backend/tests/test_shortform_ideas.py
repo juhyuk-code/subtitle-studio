@@ -64,12 +64,12 @@ def test_validation_resolves_timestamps_and_orders_parts(tmp_path):
     result = {
         "ideas": [
             {
-                "title": "Spliced hot take",
-                "hook": "english line 5",
-                "rationale": "Same context, minutes apart",
+                "title": "시간차 핫테이크",
+                "hook": "영어 라인 다섯",
+                "rationale": "같은 맥락이 몇 분 간격으로 이어짐",
                 "parts": [
-                    {"segment_ids": ["seg_000006"], "note": "hook"},
-                    {"segment_ids": ["seg_000002", "seg_000003"], "note": "payoff"},
+                    {"segment_ids": ["seg_000006"], "note": "후크"},
+                    {"segment_ids": ["seg_000002", "seg_000003"], "note": "결말"},
                 ],
             }
         ]
@@ -117,21 +117,21 @@ def test_validation_rejects_overlap_and_bad_duration(tmp_path):
     duplicate = {
         "ideas": [
             {
-                "title": "First",
+                "title": "첫 번째 아이디어",
                 "parts": [{"segment_ids": ["seg_000001", "seg_000002"]}],
             },
             {
-                "title": "Reuses",
+                "title": "재사용 아이디어",
                 "parts": [{"segment_ids": ["seg_000002", "seg_000003"]}],
             },
         ]
     }
     ideas = _validate_shortform_ideas(duplicate, compact, 40_000, 10)
-    assert [idea.title for idea in ideas] == ["First"]
+    assert [idea.title for idea in ideas] == ["첫 번째 아이디어"]
     too_short = {
         "ideas": [
             {
-                "title": "Tiny",
+                "title": "짧은 아이디어",
                 "parts": [{"segment_ids": ["seg_000001"]}],
             }
         ]
@@ -150,9 +150,9 @@ def test_generate_shortform_ideas_persists_results(tmp_path, monkeypatch):
         return {
             "ideas": [
                 {
-                    "title": "Mined idea",
-                    "hook": "english line 3",
-                    "rationale": "strong",
+                    "title": "채굴된 아이디어",
+                    "hook": "영어 라인 셋",
+                    "rationale": "강력한 인사이트",
                     "parts": [
                         {"segment_ids": ["seg_000004", "seg_000005"]},
                         {"segment_ids": ["seg_000007"]},
@@ -168,7 +168,7 @@ def test_generate_shortform_ideas_persists_results(tmp_path, monkeypatch):
     assert len(ideas) == 1
     saved = store.list("shortform_idea", project.project_id)
     assert len(saved) == 1
-    assert saved[0]["title"] == "Mined idea"
+    assert saved[0]["title"] == "채굴된 아이디어"
 
 
 def test_generate_shortform_ideas_requires_transcript(tmp_path):
@@ -197,9 +197,9 @@ def test_endpoints_generate_list_delete_and_materialize(
         return {
             "ideas": [
                 {
-                    "title": "Endpoint idea",
-                    "hook": "hook",
-                    "rationale": "why",
+                    "title": "엔드포인트 아이디어",
+                    "hook": "후크",
+                    "rationale": "이유",
                     "parts": [
                         {"segment_ids": ["seg_000004", "seg_000005"]},
                         {"segment_ids": ["seg_000007"]},

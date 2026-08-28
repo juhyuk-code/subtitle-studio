@@ -73,6 +73,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .primary:active, .secondary:active { transform: translateY(1px) scale(.985); }
 .primary:disabled { opacity: .45; cursor: not-allowed; }
 .primary.large { min-height: 46px; padding: 0 20px; font-size: calc(13px * var(--app-font-scale)); }
+.full-clip-button { background: #245a2a; color: #f9f8f3; display: inline-flex; align-items: center; gap: 7px; }
+.full-clip-button:hover { background: #2e7036; }
+.full-clip-button:disabled { opacity: .45; cursor: not-allowed; }
 .secondary { background: #fbfaf6; color: var(--ink); border-color: var(--line); }
 .secondary:hover { background: #fff; }
 .project-rail { padding: clamp(80px, 12vh, 150px) 4vw 70px; }
@@ -437,6 +440,8 @@ legend { font-size: calc(11px * var(--app-font-scale)); font-weight: 600; margin
 .inline-error { background: #f5e6df; color: #852f1d; border: 1px solid #deb6aa; padding: 10px 12px; border-radius: 6px; display: flex; align-items: center; gap: 9px; font-size: calc(11px * var(--app-font-scale)); margin: 10px; }
 .inline-error span { min-width: 0; }
 .inline-error a { margin-left: auto; flex: 0 0 auto; color: inherit; font-weight: 700; }
+.inline-notice { background: #e8efe7; color: #245a2a; border: 1px solid #bcd6bc; padding: 10px 12px; border-radius: 6px; display: flex; align-items: center; gap: 9px; font-size: calc(11px * var(--app-font-scale)); margin: 10px; }
+.inline-notice span { min-width: 0; }
 
 .editor-shell { min-height: 100dvh; background: #f6f4ee; }
 .editor-topbar { height: 58px; display: flex; align-items: center; gap: 13px; border-bottom: 1px solid var(--line); padding: 0 16px; background: #f8f6f0; position: sticky; top: 0; z-index: 5; }
@@ -1480,6 +1485,19 @@ legend { font-size: calc(11px * var(--app-font-scale)); font-weight: 600; margin
   overflow: hidden; background: #17181a;
 }
 .post-media video { width: 100%; height: 100%; object-fit: contain; display: block; }
+.post-media-poster {
+  position: relative; width: 100%; height: 100%; min-height: 160px;
+  padding: 0; border: 0; cursor: pointer; background: #17181a; display: block;
+}
+.post-media-poster img {
+  width: 100%; height: 100%; object-fit: contain; display: block;
+}
+.post-media-play {
+  position: absolute; inset: 0; display: flex; align-items: center;
+  justify-content: center; color: rgba(255,255,255,.92);
+  text-shadow: 0 1px 8px rgba(0,0,0,.6); transition: transform .12s ease;
+}
+.post-media-poster:hover .post-media-play { transform: scale(1.08); }
 .post-media-placeholder {
   width: 100%; height: 100%; min-height: 200px; display: flex; flex-direction: column;
   align-items: center; justify-content: center; gap: 6px; color: #6b6d67;

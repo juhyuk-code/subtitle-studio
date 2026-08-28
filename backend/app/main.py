@@ -1,11 +1,17 @@
 import asyncio
 import hashlib
+import json
+import logging
 import os
 import shutil
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
+
+logger = logging.getLogger(__name__)
 
 from fastapi import (
     BackgroundTasks,
@@ -22,10 +28,16 @@ from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 
 from .clips import parse_timestamp_markers
-from .desktop_paths import bundled_binary, open_folder, user_data_root
+from .desktop_paths import (
+    bundled_binary,
+    hidden_subprocess_kwargs,
+    open_folder,
+    user_data_root,
+)
 from . import xpost
 from . import xapi
 from .agent_pipeline import clip_from_timestamps, clip_everything
+from . import viral_score
 from .models import (
     AppPreferences,
     AppPreferencesPatch,
@@ -170,6 +182,54 @@ def _resolve_clip_video_path(
             path = base / output.output_name
             if path.is_file():
                 return str(path)
+    return None
+
+
+def _clip_duration_ms(store: "Store", project_id: str, clip: "TimestampClip") -> int | None:
+    """Return a clip's rendered-video duration in ms, or None if not exported."""
+    video_path = _resolve_clip_video_path(store, project_id, clip.clip_id)
+    if video_path and Path(video_path).exists():
+        try:
+            return media_duration_ms(Path(video_path))
+        except Exception:
+            return None
+    return None
+
+
+def _resolve_export_file(
+    store: "Store", project_id: str, filename: str
+) -> Path | None:
+    """Resolve an exported output (video/srt/ass) to its on-disk path."""
+    if Path(filename).name != filename:
+        return None
+    for item in reversed(store.list("job", project_id)):
+        job = Job.model_validate(item)
+        output_names = {
+            output.output_name for output in job.outputs
+        }
+        if job.output_name:
+            output_names.add(job.output_name)
+        if filename not in output_names:
+            continue
+        folders: list[tuple[Path, Path]] = []
+        if job.output_folder:
+            folders.append((Path(job.output_folder), Path()))
+        folders.append(
+            (
+                store.media_root / project_id / "exports",
+                store.media_root,
+            )
+        )
+        for folder, allowed_root in folders:
+            resolved_folder = folder.resolve()
+            if allowed_root != Path():
+                try:
+                    resolved_folder.relative_to(allowed_root.resolve())
+                except ValueError:
+                    continue
+            candidate = resolved_folder / filename
+            if candidate.is_file():
+                return candidate
     return None
 
 
@@ -1988,40 +2048,7 @@ def create_app(
         "/api/projects/{project_id}/video-exports/{filename}"
     )
     def download_video_export(project_id: str, filename: str):
-        if Path(filename).name != filename:
-            raise HTTPException(404, "Video export not found")
-        path = None
-        for item in reversed(store.list("job", project_id)):
-            job = Job.model_validate(item)
-            output_names = {
-                output.output_name for output in job.outputs
-            }
-            if job.output_name:
-                output_names.add(job.output_name)
-            if filename not in output_names:
-                continue
-            folders: list[tuple[Path, Path]] = []
-            if job.output_folder:
-                folders.append((Path(job.output_folder), Path()))
-            folders.append(
-                (
-                    store.media_root / project_id / "exports",
-                    store.media_root,
-                )
-            )
-            for folder, allowed_root in folders:
-                resolved_folder = folder.resolve()
-                if allowed_root != Path():
-                    try:
-                        resolved_folder.relative_to(allowed_root.resolve())
-                    except ValueError:
-                        continue
-                candidate = resolved_folder / filename
-                if candidate.is_file():
-                    path = candidate
-                    break
-            if path:
-                break
+        path = _resolve_export_file(store, project_id, filename)
         if path is None:
             raise HTTPException(404, "Video export not found")
         return FileResponse(
@@ -2032,6 +2059,54 @@ def create_app(
                 ".ass": "text/x-ssa",
             }.get(path.suffix.lower(), "application/octet-stream"),
             filename=filename,
+        )
+
+    @app.get(
+        "/api/projects/{project_id}/video-exports/{filename}/thumbnail",
+    )
+    def download_video_export_thumbnail(project_id: str, filename: str):
+        """Serve a tiny JPEG poster frame for a video export.
+
+        Generated on first request with ffmpeg and cached next to the video
+        (<name>.thumb.jpg). Lets the scheduled-posts list show a lightweight
+        preview instead of loading the full multi-hundred-MB MP4 metadata.
+        """
+        path = _resolve_export_file(store, project_id, filename)
+        if path is None:
+            raise HTTPException(404, "Video export not found")
+        if path.suffix.lower() != ".mp4":
+            raise HTTPException(404, "Thumbnail is only available for videos")
+        thumb_path = path.with_name(path.name + ".thumb.jpg")
+        if not thumb_path.is_file():
+            ffmpeg = bundled_binary("ffmpeg")
+            result = subprocess.run(
+                [
+                    ffmpeg,
+                    "-y",
+                    "-v",
+                    "error",
+                    "-ss",
+                    "2",
+                    "-i",
+                    str(path),
+                    "-frames:v",
+                    "1",
+                    "-vf",
+                    "scale=480:-2",
+                    "-q:v",
+                    "6",
+                    str(thumb_path),
+                ],
+                capture_output=True,
+                text=True,
+                **hidden_subprocess_kwargs(),
+            )
+            if result.returncode != 0:
+                raise HTTPException(502, "Could not generate thumbnail")
+        return FileResponse(
+            thumb_path,
+            media_type="image/jpeg",
+            headers={"Cache-Control": "public, max-age=86400"},
         )
 
     @app.get("/api/projects/{project_id}/export/{format_name}")
@@ -2419,6 +2494,44 @@ def create_app(
         background.add_task(_run)
         return {"job_id": job.job_id, "status": "started"}
 
+    # --- Agent full-clip request (button -> file the agent's cron polls) ----
+
+    @app.post("/api/agent/full-clip-request", response_model=dict)
+    def agent_full_clip_request(project_id: str):
+        """Signal the Hermes agent to run the ENTIRE full clipping process.
+
+        The in-app "Full clip + post" button hits this. It writes a small
+        request file that the agent's watcher cron picks up; the agent then
+        drives the whole pipeline (clip everything, captions, shortform ideas,
+        post copy, scheduling) and reports back. Nothing runs in-process here —
+        the app just drops the request for the agent.
+        """
+        if not store.get("project", project_id):
+            raise HTTPException(404, "Project not found")
+        request_root = store.root / "agent-requests"
+        request_root.mkdir(parents=True, exist_ok=True)
+        request_file = request_root / "full-clip-request.json"
+        request_file.write_text(
+            json.dumps(
+                {
+                    "project_id": project_id,
+                    "requested_at": datetime.now(timezone.utc).isoformat(),
+                    "action": "full_clip_post",
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        return {
+            "status": "queued",
+            "project_id": project_id,
+            "message": (
+                "Full clip + post requested. The agent will process this "
+                "project and report back when done."
+            ),
+        }
+
     # --- X account settings ------------------------------------------------
 
     @app.get("/api/settings/x", response_model=XAccountSettingsStatus)
@@ -2480,14 +2593,32 @@ def create_app(
     )
     def create_post(request: ScheduledPostCreate):
         settings = xpost.load_account_settings(store)
+        video_path = request.video_path or _resolve_clip_video_path(
+            store, request.project_id, request.clip_id
+        )
+        # X (Twitter) rejects videos longer than 10 minutes (403). Refuse to
+        # schedule them up front instead of failing silently at post time.
+        if video_path and Path(video_path).exists():
+            try:
+                duration_ms = media_duration_ms(Path(video_path))
+            except Exception as exc:  # noqa: BLE001 - ffprobe may be unavailable
+                logger.warning(
+                    "Could not measure video duration for %s: %s", video_path, exc
+                )
+                duration_ms = None
+            if duration_ms and duration_ms > 10 * 60 * 1000:
+                raise HTTPException(
+                    422,
+                    f"Video is {duration_ms / 60_000:.1f} minutes, longer than "
+                    "X's 10-minute limit. Re-cut it into shorter clips before "
+                    "scheduling.",
+                )
         post = ScheduledPost(
             project_id=request.project_id,
             clip_id=request.clip_id,
             text=request.text,
             scheduled_at=request.scheduled_at,
-            video_path=request.video_path or _resolve_clip_video_path(
-                store, request.project_id, request.clip_id
-            ),
+            video_path=video_path,
             method=request.method or settings.method,
         )
         xpost.save_scheduled_post(store, post)
@@ -2533,6 +2664,81 @@ def create_app(
     @app.post("/api/scheduled-posts/publish-due", response_model=dict)
     def publish_due_now():
         return {"posted": xpost.publish_due_posts(store)}
+
+    # --- Viral-potential scoring (drives scheduling order) --------------------
+
+    @app.get("/api/projects/{project_id}/viral-scores", response_model=dict)
+    def list_viral_scores(project_id: str):
+        """Return per-clip viral scores (if scored) ranked most-viral first."""
+        clips = [TimestampClip.model_validate(item) for item in store.list("clip", project_id)]
+        rows = []
+        for clip in clips:
+            data = store.get("post_copy", f"{project_id}:{clip.clip_id}")
+            score = None
+            rationale = None
+            headline = ""
+            if data:
+                post_copy = PostCopy.model_validate(data)
+                score = post_copy.viral_score
+                rationale = post_copy.viral_rationale
+                headline = post_copy.headline
+            duration_ms = _clip_duration_ms(store, project_id, clip)
+            rows.append(
+                {
+                    "clip_id": clip.clip_id,
+                    "title": clip.title or "",
+                    "start_ms": clip.start_ms,
+                    "end_ms": clip.end_ms,
+                    "duration_ms": duration_ms,
+                    "viral_score": score,
+                    "viral_rationale": rationale,
+                    "headline": headline,
+                    "too_long": duration_ms is not None and duration_ms > 10 * 60 * 1000,
+                }
+            )
+        rows.sort(key=lambda r: (r["viral_score"] is None, -(r["viral_score"] or 0)))
+        return {"clips": rows, "scored": sum(1 for r in rows if r["viral_score"] is not None)}
+
+    @app.post("/api/projects/{project_id}/viral-scores", response_model=dict)
+    async def score_project_viral(project_id: str, background_tasks: BackgroundTasks):
+        """Score every clip for viral potential; returns the ranking."""
+        clips = [TimestampClip.model_validate(item) for item in store.list("clip", project_id)]
+        if not clips:
+            raise HTTPException(404, "No clips in this project")
+
+        # Build transcript + post copy maps.
+        transcripts_by_clip: dict[str, list[dict[str, Any]]] = {}
+        post_copies_by_clip: dict[str, PostCopy] = {}
+        segments = [dict(s) for s in store.list("segment", project_id)]
+        for clip in clips:
+            post_data = store.get("post_copy", f"{project_id}:{clip.clip_id}")
+            if post_data:
+                post_copies_by_clip[clip.clip_id] = PostCopy.model_validate(post_data)
+            transcripts_by_clip[clip.clip_id] = [
+                {
+                    "start_ms": s["start_ms"],
+                    "end_ms": s["end_ms"],
+                    "english": s.get("english") or "",
+                }
+                for s in segments
+                if s.get("start_ms", 0) >= clip.start_ms and s.get("end_ms", 0) <= clip.end_ms
+            ]
+
+        def run():
+            import asyncio
+            loop = asyncio.new_event_loop()
+            try:
+                batch = loop.run_until_complete(
+                    viral_score.score_project_clips(
+                        store, project_id, clips, transcripts_by_clip, post_copies_by_clip
+                    )
+                )
+                viral_score.persist_scores(store, project_id, batch)
+            finally:
+                loop.close()
+
+        background_tasks.add_task(run)
+        return {"status": "started", "clips": len(clips)}
 
     xpost.register_poster("api", xapi.post_to_x)
     xpost.start_scheduler(store)

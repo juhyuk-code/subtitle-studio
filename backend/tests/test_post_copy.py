@@ -202,3 +202,13 @@ def test_post_copy_endpoint_marks_changed_transcripts_stale(tmp_path):
     assert edited.status_code == 200
     assert edited.json()["headline"] == "Manually edited headline"
     assert edited.json()["stale"] is True
+
+
+def test_post_copy_prompt_enforces_korea_keyword_rule():
+    """Korea-keyword rule: only include 'Korea' when the transcript is
+    genuinely about Korea, never default to it because the podcast is Korean
+    (user requirement, clarified 2026-08-26)."""
+    assert "Korea keyword rule" in POST_COPY_PROMPT
+    assert "transcript evidence required" in POST_COPY_PROMPT
+    assert "never on the fact that the podcast happens to be Korean" in POST_COPY_PROMPT
+    assert "Korea" in POST_COPY_PROMPT.split("## Korea keyword rule")[1]
