@@ -58,6 +58,7 @@ from .models import (
     ProjectWorkspacePatch,
     ProjectWorkspaceState,
     Segment,
+    SegmentListRow,
     SegmentPatch,
     ShortformIdea,
     Speaker,
@@ -610,7 +611,7 @@ def create_app(
         if project_dir.exists():
             shutil.rmtree(project_dir)
 
-    @app.get("/api/projects/{project_id}/segments", response_model=list[Segment])
+    @app.get("/api/projects/{project_id}/segments", response_model=list[SegmentListRow])
     def list_segments(project_id: str):
         segments = [
             Segment.model_validate(item)
