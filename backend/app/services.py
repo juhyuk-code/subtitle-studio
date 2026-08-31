@@ -1042,6 +1042,104 @@ def align_segments_to_speakers(
     ]
 
 
+# ---- Continuous-take merging -------------------------------------------------
+# whisper's ASR emits very short segments (median ~2s, most under 3s): with
+# vad_filter it splits at every 500ms of silence, so a speaker's continuous
+# monologue becomes dozens of tiny fragments that read as disconnected
+# sentences. merge_segments_into_takes() groups consecutive same-speaker
+# segments separated by only short pauses into a single longer "take" (a
+# paragraph), so translation sees full context and captions flow continuously
+# instead of chopping every clause into its own caption block.
+
+TAKE_MAX_GAP_MS = 1_200  # pause longer than this = a new take
+TAKE_MAX_DURATION_MS = 45_000  # cap a single take's span
+
+
+def merge_segments_into_takes(segments: list[Segment]) -> list[Segment]:
+    """Merge consecutive same-speaker ASR fragments into continuous takes.
+
+    Two adjacent segments merge when they share a clip and speaker, the gap
+    between them is at most TAKE_MAX_GAP_MS, and the combined take stays under
+    TAKE_MAX_DURATION_MS. Language fields are joined with a space; word lists
+    are concatenated so caption timing stays accurate. Segments that can't
+    merge (speaker change, long pause, clip boundary, too long) pass through
+    unchanged.
+    """
+    if not segments:
+        return segments
+    ordered = sorted(segments, key=lambda s: (s.start_ms, s.end_ms))
+    merged: list[Segment] = []
+    current: list[Segment] = [ordered[0]]
+
+    def flush() -> None:
+        if len(current) == 1:
+            merged.append(current[0])
+            return
+        first, last = current[0], current[-1]
+        joined = first.model_copy(
+            update={
+                "end_ms": last.end_ms,
+                "raw_korean": " ".join(
+                    s.raw_korean.strip() for s in current if s.raw_korean.strip()
+                ),
+                "pass_1_korean": " ".join(
+                    s.pass_1_korean.strip()
+                    for s in current
+                    if s.pass_1_korean.strip()
+                ),
+                "pass_2_korean": " ".join(
+                    s.pass_2_korean.strip()
+                    for s in current
+                    if s.pass_2_korean.strip()
+                ),
+                "english": " ".join(
+                    s.english.strip() for s in current if s.english.strip()
+                ),
+                "words": [word for s in current for word in s.words],
+                "change_reasons": list(
+                    dict.fromkeys(
+                        reason
+                        for s in current
+                        for reason in s.change_reasons
+                    )
+                )
+                + ["merged_into_take"],
+            }
+        )
+        merged.append(joined)
+
+    for segment in ordered[1:]:
+        previous = current[-1]
+        same_clip = (
+            segment.clip_id is not None
+            and segment.clip_id == previous.clip_id
+        )
+        same_speaker = (
+            segment.speaker_id is not None
+            and segment.speaker_id == previous.speaker_id
+        )
+        gap = segment.start_ms - previous.end_ms
+        combined_duration = segment.end_ms - current[0].start_ms
+        if (
+            same_clip
+            and same_speaker
+            and gap <= TAKE_MAX_GAP_MS
+            and combined_duration <= TAKE_MAX_DURATION_MS
+            and not previous.locked
+            and not segment.locked
+        ):
+            current.append(segment)
+        else:
+            flush()
+            current = [segment]
+    flush()
+
+    return [
+        segment.model_copy(update={"segment_id": f"seg_{index + 1:06d}"})
+        for index, segment in enumerate(merged)
+    ]
+
+
 def _annotation_turns(annotation: Any) -> list[SpeakerTurn]:
     rows = (
         annotation.itertracks(yield_label=True)
@@ -1680,6 +1778,11 @@ def run_transcription(
         transcribed_segments = align_segments_to_speakers(
             transcribed_segments, detected_turns
         )
+        # Merge whisper's tiny same-speaker ASR fragments into continuous
+        # "takes" (paragraphs) so translation sees full context and captions
+        # flow as a paragraph instead of chopping every clause into its own
+        # short caption block.
+        transcribed_segments = merge_segments_into_takes(transcribed_segments)
         existing_speakers = [
             Speaker.model_validate(item)
             for item in store.list("speaker", project_id)
