@@ -115,16 +115,16 @@ def test_post_copy_prompt_follows_the_master_format():
     assert "central argument" in POST_COPY_PROMPT
     assert "clip's most important idea" in POST_COPY_PROMPT
     assert "Never name or identify a speaker" in POST_COPY_PROMPT
-    assert "never over 30" in POST_COPY_PROMPT
-    assert "under 12 words" in POST_COPY_PROMPT
-    assert "3–7 quotes" in POST_COPY_PROMPT
-    assert "Stay loyal to the original transcript" in POST_COPY_PROMPT
+    assert "short intro paragraph" in POST_COPY_PROMPT
+    assert "roughly 30-60 words" in POST_COPY_PROMPT
+    assert "2-4 quotes that carry the clip's core content" in POST_COPY_PROMPT
+    assert "do not need to follow the actual transcript word-for-word" in POST_COPY_PROMPT
     assert "separated by blank lines" in POST_COPY_PROMPT
     assert "Return only JSON" in POST_COPY_PROMPT
     assert "Never use em dashes" in POST_COPY_PROMPT
 
 
-def test_long_quote_is_split_into_sentence_by_sentence_blocks():
+def test_long_quote_is_kept_whole_not_split_into_one_liners():
     body = (
         'Alex: "Korea is having a global cultural moment. '
         "NVIDIA is asking Korea for DRAM. "
@@ -134,12 +134,12 @@ def test_long_quote_is_split_into_sentence_by_sentence_blocks():
 
     formatted = format_post_copy_quote_blocks(body)
 
-    assert formatted.split("\n\n") == [
-        'Alex: "Korea is having a global cultural moment."',
-        '"NVIDIA is asking Korea for DRAM."',
-        '"At the same time, young people are losing leveraged savings."',
-        '"Is there another country this extreme?"',
-    ]
+    # A single quoted passage must stay whole — never broken into one-liners.
+    assert formatted == (
+        'Alex: "Korea is having a global cultural moment. NVIDIA is asking Korea '
+        'for DRAM. At the same time, young people are losing leveraged savings. '
+        'Is there another country this extreme?"'
+    )
 
 
 def test_post_copy_requires_an_english_transcript(tmp_path):
