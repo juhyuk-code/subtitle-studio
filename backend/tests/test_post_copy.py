@@ -116,12 +116,21 @@ def test_post_copy_prompt_follows_the_master_format():
     assert "clip's most important idea" in POST_COPY_PROMPT
     assert "Never name or identify a speaker" in POST_COPY_PROMPT
     assert "short intro paragraph" in POST_COPY_PROMPT
-    assert "roughly 30-60 words" in POST_COPY_PROMPT
+    assert "30-60" in POST_COPY_PROMPT
     assert "2-4 quotes that carry the clip's core content" in POST_COPY_PROMPT
     assert "do not need to follow the actual transcript word-for-word" in POST_COPY_PROMPT
     assert "separated by blank lines" in POST_COPY_PROMPT
     assert "Return only JSON" in POST_COPY_PROMPT
     assert "Never use em dashes" in POST_COPY_PROMPT
+
+
+def test_post_copy_prompt_enforces_first_person_human_voice():
+    assert "FIRST PERSON" in POST_COPY_PROMPT
+    assert "This clip explores" in POST_COPY_PROMPT  # listed as a forbidden opener
+    assert "The clip is about" in POST_COPY_PROMPT   # listed as a forbidden opener
+    assert "The speaker argues" in POST_COPY_PROMPT   # listed as a forbidden opener
+    assert "person sharing this clip" in POST_COPY_PROMPT
+    assert "human tweeted it" in POST_COPY_PROMPT
 
 
 def test_long_quote_is_kept_whole_not_split_into_one_liners():
