@@ -1639,9 +1639,9 @@ def create_app(
                 "clip_id": clip_id,
                 "pipeline": True,
                 "pipeline_step": max(1, rank),
-                "pipeline_total": 6,
+                "pipeline_total": 5,
                 "pipeline_completed": False,
-                "overall_progress": max(0, rank - 1) / 6,
+                "overall_progress": max(0, rank - 1) / 5,
             }
         )
         store.save_job(job)
@@ -1769,6 +1769,16 @@ def create_app(
             async def _translate_then_shortform():
                 await run_language_stage(
                     store, project_id, job.job_id, stage, selected_clips
+                )
+                job2 = Job.model_validate(store.get("job", job_id))
+                if job2.cancelled or job2.stage in {"cancelled", "failed"}:
+                    return
+                await run_language_stage(
+                    store,
+                    project_id,
+                    job.job_id,
+                    "english_polish",
+                    selected_clips,
                 )
                 job2 = Job.model_validate(store.get("job", job_id))
                 if job2.cancelled or job2.stage in {"cancelled", "failed"}:
@@ -2719,7 +2729,7 @@ def create_app(
                 {
                     "start_ms": s["start_ms"],
                     "end_ms": s["end_ms"],
-                    "english": s.get("english") or "",
+                    "english": s.get("english_pass_2") or s.get("english") or "",
                 }
                 for s in segments
                 if s.get("start_ms", 0) >= clip.start_ms and s.get("end_ms", 0) <= clip.end_ms

@@ -240,12 +240,12 @@ def test_language_stage_processes_windows_and_retries_omissions(
         if required == ["seg_2"] and len(
             [call for call in calls if call["required_segment_ids"] == required]
         ) == 1:
-            return {"corrected_segments": []}
+            return {"translations": []}
         return {
-            "corrected_segments": [
+            "translations": [
                 {
                     "segment_id": segment_id,
-                    "corrected_korean": f"교정 {segment_id}",
+                    "english": f"English {segment_id}",
                 }
                 for segment_id in required
             ]
@@ -258,15 +258,15 @@ def test_language_stage_processes_windows_and_retries_omissions(
             store,
             project.project_id,
             job.job_id,
-            "correcting_pass_1",
+            "translating",
         )
     )
 
     completed = Job.model_validate(store.get("job", job.job_id))
-    assert completed.stage == "corrected_pass_1"
+    assert completed.stage == "translated"
     assert len(calls) == 4
     assert any("repair_instruction" in call for call in calls)
     assert [
-        item["pass_1_korean"]
+        item["english"]
         for item in store.list("segment", project.project_id)
-    ] == ["교정 seg_1", "교정 seg_2", "교정 seg_3"]
+    ] == ["English seg_1", "English seg_2", "English seg_3"]

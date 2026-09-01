@@ -202,6 +202,7 @@ class Segment(BaseModel):
     pass_1_korean: str = ""
     pass_2_korean: str = ""
     english: str = ""
+    english_pass_2: str = ""
     words: list[Word] = Field(default_factory=list)
     confidence: float = 0.0
     no_speech_probability: float = 0.0
@@ -218,6 +219,7 @@ class SegmentPatch(BaseModel):
     speaker_id: str | None = None
     pass_2_korean: str | None = None
     english: str | None = None
+    english_pass_2: str | None = None
     locked: bool | None = None
     approved: bool | None = None
 
@@ -239,6 +241,7 @@ class SegmentListRow(BaseModel):
     pass_1_korean: str = ""
     pass_2_korean: str = ""
     english: str = ""
+    english_pass_2: str = ""
     confidence: float = 0.0
     no_speech_probability: float = 0.0
     change_reasons: list[str] = Field(default_factory=list)

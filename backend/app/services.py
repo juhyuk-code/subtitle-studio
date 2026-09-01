@@ -82,10 +82,9 @@ WORKFLOW_RANK = {
     "media_ready": 1,
     "speakers_detected": 2,
     "transcribed": 3,
-    "corrected_pass_1": 4,
-    "corrected": 5,
-    "translated": 6,
-    "shortform_ideas": 7,
+    "translated": 4,
+    "english_polished": 5,
+    "shortform_ideas": 6,
 }
 
 CORRECTION_PROMPT = """You are correcting Korean automatic speech recognition output.
@@ -102,11 +101,24 @@ Never change locked segments. Return only JSON: {"corrected_segments":[{"segment
 "corrected_korean":"...","change_reason":["terminology"],"confidence":0.9,
 "uncertain_phrases":[]}]}"""
 
-TRANSLATION_PROMPT = """Translate corrected Korean podcast dialogue into natural conversational English.
+TRANSLATION_PROMPT = """Translate Korean podcast dialogue (the raw_korean field) into natural conversational English.
 Preserve meaning, intention, emotion, sarcasm, uncertainty, interruptions, terminology, and profanity.
 Use speaker labels to preserve each voice and turn-taking. Never invent a speaker identity.
 Use contractions naturally. Do not add explanations or create subtitle line breaks.
 Return only JSON: {"translations":[{"segment_id":"...","english":"...","warnings":[]}]}"""
+
+ENGLISH_POLISH_PROMPT = """You are a native-English copy editor polishing a draft English translation of Korean podcast dialogue.
+
+The text below (the `english` field of each segment) is a draft English translation. It may sound awkward, overly literal, or choppy because it follows Korean sentence structure. Your job is to make it read like natural, fluent spoken English while staying faithful to what was said. Read the `english` field as your source text and improve it.
+
+Rules:
+- Keep the meaning, intention, emotion, sarcasm, uncertainty, interruptions, terminology, and profanity intact. Do not soften or change what was said.
+- Fix awkward phrasing, overly literal Koreanisms, and unnatural word order so it reads like a native English speaker talking.
+- Do not add new facts, explanations, or editorial commentary. Do not delete real content to make it shorter.
+- Keep the speaker's voice and turn-taking. Do not invent a speaker identity.
+- Use contractions naturally.
+- Do not create subtitle line breaks.
+- Return only JSON: {"translations":[{"segment_id":"...","english":"...","warnings":[]}]}"""
 
 POST_COPY_PROMPT = """# Project: Twitter/X Clip Captions
 
@@ -1038,6 +1050,18 @@ TAKE_MAX_GAP_MS = 1_200  # pause longer than this = a new take
 TAKE_MAX_DURATION_MS = 45_000  # cap a single take's span
 
 
+def _best_english(segment: Any) -> str:
+    """Return the best available English translation for a segment.
+
+    Prefers the polished second-pass English (english_pass_2) when present,
+    falling back to the first-pass translation (english).
+    """
+    pass_2 = str(getattr(segment, "english_pass_2", "") or "").strip()
+    if pass_2:
+        return pass_2
+    return str(getattr(segment, "english", "") or "").strip()
+
+
 def merge_segments_into_takes(segments: list[Segment]) -> list[Segment]:
     """Merge consecutive same-speaker ASR fragments into continuous takes.
 
@@ -1077,6 +1101,11 @@ def merge_segments_into_takes(segments: list[Segment]) -> list[Segment]:
                 ),
                 "english": " ".join(
                     s.english.strip() for s in current if s.english.strip()
+                ),
+                "english_pass_2": " ".join(
+                    s.english_pass_2.strip()
+                    for s in current
+                    if s.english_pass_2.strip()
                 ),
                 "words": [word for s in current for word in s.words],
                 "change_reasons": list(
@@ -2114,7 +2143,9 @@ def _post_copy_source(
             and item.get("start_ms", -1) < clip.end_ms
             and item.get("end_ms", -1) > clip.start_ms
         )
-        english = str(item.get("english") or "").strip()
+        english = str(
+            item.get("english_pass_2") or item.get("english") or ""
+        ).strip()
         if not belongs_to_clip or not english:
             continue
         speaker_id = item.get("speaker_id")
@@ -2264,7 +2295,9 @@ def shortform_transcript_payload(
             "e": int(item.get("end_ms", 0)),
             "ko": text,
         }
-        english = str(item.get("english") or "").strip()
+        english = str(
+            item.get("english_pass_2") or item.get("english") or ""
+        ).strip()
         if english:
             entry["en"] = english
         compact.append(entry)
@@ -2526,7 +2559,11 @@ def _dialogue_batches(
 def _language_rows(
     result: dict[str, Any], stage: str
 ) -> list[dict[str, Any]]:
-    key = "translations" if stage == "translating" else "corrected_segments"
+    key = (
+        "translations"
+        if stage in {"translating", "english_polish"}
+        else "corrected_segments"
+    )
     rows = result.get(key)
     # Tolerate the model returning the key missing or wrapped oddly: fall
     # back to scanning for the first list-of-dicts value in the response.
@@ -2555,9 +2592,8 @@ async def run_language_stage(
 ) -> None:
     job = Job.model_validate(store.get("job", job_id))
     prompts = {
-        "correcting_pass_1": CORRECTION_PROMPT,
-        "correcting_pass_2": CONSISTENCY_PROMPT,
         "translating": TRANSLATION_PROMPT,
+        "english_polish": ENGLISH_POLISH_PROMPT,
     }
     try:
         job.stage, job.progress = stage, 0.1
@@ -2568,9 +2604,8 @@ async def run_language_stage(
             for item in store.list("segment", project_id)
         }
         stage_field = {
-            "correcting_pass_1": "pass_1_korean",
-            "correcting_pass_2": "pass_2_korean",
             "translating": "english",
+            "english_polish": "english_pass_2",
         }[stage]
         batches = _dialogue_batches(payload["segments"])
 
@@ -2585,6 +2620,13 @@ async def run_language_stage(
                 if item.get("segment_id") in segments
                 and not segments[item["segment_id"]].locked
                 and not getattr(segments[item["segment_id"]], stage_field)
+                # The polish stage needs a draft English to improve; a segment
+                # whose first-pass translation failed must wait for a retry of
+                # the translating stage, not be polished from nothing.
+                and (
+                    stage != "english_polish"
+                    or str(segments[item["segment_id"]].english or "").strip()
+                )
             ]
             if required_ids:
                 pending.append((batch, required_ids))
@@ -2672,6 +2714,16 @@ async def run_language_stage(
                         segment.status = (
                             "warning" if segment.warnings else "translated"
                         )
+                    elif stage == "english_polish":
+                        segment.english_pass_2 = row.get(
+                            "english", segment.english_pass_2
+                        )
+                        segment.warnings = row.get("warnings", [])
+                        segment.status = (
+                            "warning"
+                            if segment.warnings
+                            else "english_polished"
+                        )
                     else:
                         setattr(
                             segment,
@@ -2721,9 +2773,8 @@ async def run_language_stage(
                 *(guarded(batch, rids) for batch, rids in pending)
             )
         status = {
-            "correcting_pass_1": "corrected_pass_1",
-            "correcting_pass_2": "corrected",
             "translating": "translated",
+            "english_polish": "english_polished",
         }[stage]
         job.stage, job.progress = status, 1
         job.warning_count = sum(
@@ -2804,28 +2855,6 @@ async def run_english_pipeline(
         ),
         (
             3,
-            "corrected_pass_1",
-            lambda: run_language_stage(
-                store,
-                project_id,
-                job_id,
-                "correcting_pass_1",
-                clips,
-            ),
-        ),
-        (
-            4,
-            "corrected",
-            lambda: run_language_stage(
-                store,
-                project_id,
-                job_id,
-                "correcting_pass_2",
-                clips,
-            ),
-        ),
-        (
-            5,
             "translated",
             lambda: run_language_stage(
                 store,
@@ -2836,7 +2865,18 @@ async def run_english_pipeline(
             ),
         ),
         (
-            6,
+            4,
+            "english_polished",
+            lambda: run_language_stage(
+                store,
+                project_id,
+                job_id,
+                "english_polish",
+                clips,
+            ),
+        ),
+        (
+            5,
             "shortform_ideas",
             lambda: run_shortform_ideas_stage(store, project_id, job_id, clips),
         ),
@@ -2956,11 +2996,7 @@ def caption_source_signature(
     source = []
     for data in segments:
         segment = Segment.model_validate(data)
-        korean = (
-            segment.pass_2_korean
-            or segment.pass_1_korean
-            or segment.raw_korean
-        )
+        korean = segment.raw_korean
         source.append(
             {
                 "id": segment.segment_id,
@@ -2968,7 +3004,7 @@ def caption_source_signature(
                 "end": segment.end_ms,
                 "clip": segment.clip_id,
                 "speaker": segment.speaker_id,
-                "text": segment.english or korean
+                "text": _best_english(segment) or korean
                 if language == "en"
                 else korean,
             }
@@ -3028,12 +3064,8 @@ def generate_caption_track(
     words: list[CaptionWord] = []
     for data in sorted(segments, key=lambda item: item.get("start_ms", 0)):
         segment = Segment.model_validate(data)
-        korean = (
-            segment.pass_2_korean
-            or segment.pass_1_korean
-            or segment.raw_korean
-        )
-        text = segment.english or korean if language == "en" else korean
+        korean = segment.raw_korean
+        text = _best_english(segment) or korean if language == "en" else korean
         text_words = text.split()
         if not text_words:
             continue
@@ -3267,12 +3299,8 @@ def export_ass_subtitles(
         segment = Segment.model_validate(data)
         start = max(previous_end, segment.start_ms)
         end = max(start + 80, segment.end_ms)
-        korean = (
-            segment.pass_2_korean
-            or segment.pass_1_korean
-            or segment.raw_korean
-        )
-        english = segment.english or korean
+        korean = segment.raw_korean
+        english = _best_english(segment) or korean
         if bilingual:
             lines = [
                 *wrap_subtitle(korean, style.max_words_per_line),
@@ -3401,8 +3429,8 @@ def export_subtitles(
         segment = Segment.model_validate(data)
         start = max(previous_end, segment.start_ms)
         end = max(start + 80, segment.end_ms)
-        korean = segment.pass_2_korean or segment.pass_1_korean or segment.raw_korean
-        english = segment.english or korean
+        korean = segment.raw_korean
+        english = _best_english(segment) or korean
         if bilingual:
             lines = [
                 *wrap_subtitle(korean, max_words_per_line),
