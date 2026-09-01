@@ -2226,6 +2226,17 @@ def format_post_copy_quote_blocks(body: str) -> str:
     return "\n\n".join(formatted)
 
 
+def _strip_post_copy_dashes(text: str) -> str:
+    """Replace em/en dashes with commas/periods (prompt forbids them)."""
+    import re as _re
+    # em dash with any surrounding whitespace -> comma
+    text = _re.sub(r"\s*\u2014\s*", ", ", text)
+    # en dash -> hyphen (ranges)
+    text = text.replace("\u2013", "-")
+    text = _re.sub(r" +", " ", text)
+    return text.strip()
+
+
 async def generate_post_copy(
     store: Store, project_id: str, clip_id: str
 ) -> PostCopy:
@@ -2270,6 +2281,8 @@ async def generate_post_copy(
         raise RuntimeError(
             "The language model returned incomplete post copy. Try again."
         )
+    headline = _strip_post_copy_dashes(headline)
+    body = _strip_post_copy_dashes(body)
     body = format_post_copy_quote_blocks(body)
     post_copy = PostCopy(
         clip_id=clip_id,

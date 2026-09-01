@@ -221,3 +221,13 @@ def test_post_copy_prompt_enforces_korea_keyword_rule():
     assert "transcript evidence required" in POST_COPY_PROMPT
     assert "never on the fact that the podcast happens to be Korean" in POST_COPY_PROMPT
     assert "Korea" in POST_COPY_PROMPT.split("## Korea keyword rule")[1]
+
+
+def test_strip_post_copy_dashes():
+    from backend.app.services import _strip_post_copy_dashes
+
+    assert "—" not in _strip_post_copy_dashes("one — two")
+    assert "–" not in _strip_post_copy_dashes("one – two")
+    assert _strip_post_copy_dashes("real quick — it matters") == "real quick, it matters"
+    assert _strip_post_copy_dashes("lines 10–20") == "lines 10-20"
+    assert _strip_post_copy_dashes("no dashes") == "no dashes"
