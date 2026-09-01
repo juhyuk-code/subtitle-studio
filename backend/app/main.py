@@ -1829,6 +1829,17 @@ def create_app(
             project_id, "translating", background, clip_id
         )
 
+    @app.post("/api/projects/{project_id}/polish", response_model=Job, status_code=202)
+    def polish_english(
+        project_id: str,
+        background: BackgroundTasks,
+        clip_id: str | None = None,
+    ):
+        """Second English pass: polish the first-pass translation in place."""
+        return start_language_job(
+            project_id, "english_polish", background, clip_id
+        )
+
     @app.post(
         "/api/projects/{project_id}/export/video",
         response_model=Job,
