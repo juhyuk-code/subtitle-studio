@@ -202,6 +202,7 @@ class Segment(BaseModel):
     pass_1_korean: str = ""
     pass_2_korean: str = ""
     english: str = ""
+    english_pass_2: str = ""
     words: list[Word] = Field(default_factory=list)
     confidence: float = 0.0
     no_speech_probability: float = 0.0
@@ -218,8 +219,36 @@ class SegmentPatch(BaseModel):
     speaker_id: str | None = None
     pass_2_korean: str | None = None
     english: str | None = None
+    english_pass_2: str | None = None
     locked: bool | None = None
     approved: bool | None = None
+
+
+class SegmentListRow(BaseModel):
+    """Segment as served to the frontend list — omits per-word timestamps.
+
+    ``words`` (11k+ entries for a 2k-segment project) is only needed by the
+    transcription pipeline, not by the editor UI. Keeping it out of the list
+    payload cuts the JSON roughly in half and shrinks renderer memory.
+    """
+
+    segment_id: str
+    start_ms: int
+    end_ms: int
+    clip_id: str | None = None
+    speaker_id: str | None = None
+    raw_korean: str
+    pass_1_korean: str = ""
+    pass_2_korean: str = ""
+    english: str = ""
+    english_pass_2: str = ""
+    confidence: float = 0.0
+    no_speech_probability: float = 0.0
+    change_reasons: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    status: str = "raw"
+    locked: bool = False
+    approved: bool = False
 
 
 class CaptionCue(BaseModel):

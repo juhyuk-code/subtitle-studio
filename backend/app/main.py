@@ -58,6 +58,7 @@ from .models import (
     ProjectWorkspacePatch,
     ProjectWorkspaceState,
     Segment,
+    SegmentListRow,
     SegmentPatch,
     ShortformIdea,
     Speaker,
@@ -610,7 +611,7 @@ def create_app(
         if project_dir.exists():
             shutil.rmtree(project_dir)
 
-    @app.get("/api/projects/{project_id}/segments", response_model=list[Segment])
+    @app.get("/api/projects/{project_id}/segments", response_model=list[SegmentListRow])
     def list_segments(project_id: str):
         segments = [
             Segment.model_validate(item)
@@ -1638,9 +1639,9 @@ def create_app(
                 "clip_id": clip_id,
                 "pipeline": True,
                 "pipeline_step": max(1, rank),
-                "pipeline_total": 6,
+                "pipeline_total": 5,
                 "pipeline_completed": False,
-                "overall_progress": max(0, rank - 1) / 6,
+                "overall_progress": max(0, rank - 1) / 5,
             }
         )
         store.save_job(job)
@@ -1772,6 +1773,16 @@ def create_app(
                 job2 = Job.model_validate(store.get("job", job_id))
                 if job2.cancelled or job2.stage in {"cancelled", "failed"}:
                     return
+                await run_language_stage(
+                    store,
+                    project_id,
+                    job.job_id,
+                    "english_polish",
+                    selected_clips,
+                )
+                job2 = Job.model_validate(store.get("job", job_id))
+                if job2.cancelled or job2.stage in {"cancelled", "failed"}:
+                    return
                 await run_shortform_ideas_stage(
                     store, project_id, job.job_id, selected_clips
                 )
@@ -1816,6 +1827,17 @@ def create_app(
     ):
         return start_language_job(
             project_id, "translating", background, clip_id
+        )
+
+    @app.post("/api/projects/{project_id}/polish", response_model=Job, status_code=202)
+    def polish_english(
+        project_id: str,
+        background: BackgroundTasks,
+        clip_id: str | None = None,
+    ):
+        """Second English pass: polish the first-pass translation in place."""
+        return start_language_job(
+            project_id, "english_polish", background, clip_id
         )
 
     @app.post(
@@ -2718,7 +2740,7 @@ def create_app(
                 {
                     "start_ms": s["start_ms"],
                     "end_ms": s["end_ms"],
-                    "english": s.get("english") or "",
+                    "english": s.get("english_pass_2") or s.get("english") or "",
                 }
                 for s in segments
                 if s.get("start_ms", 0) >= clip.start_ms and s.get("end_ms", 0) <= clip.end_ms

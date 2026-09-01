@@ -92,9 +92,8 @@ def test_english_pipeline_runs_every_stage_in_order(tmp_path, monkeypatch):
 
     async def finish_language(*args):
         stages = {
-            "correcting_pass_1": ("corrected_pass_1", "pass-1"),
-            "correcting_pass_2": ("corrected", "pass-2"),
             "translating": ("translated", "translate"),
+            "english_polish": ("english_polished", "polish"),
         }
         finish(*stages[args[3]])
 
@@ -118,9 +117,8 @@ def test_english_pipeline_runs_every_stage_in_order(tmp_path, monkeypatch):
     assert calls == [
         "diarize",
         "transcribe",
-        "pass-1",
-        "pass-2",
         "translate",
+        "polish",
         "shortform",
     ]
     assert completed.stage == "shortform_ideas"
@@ -157,9 +155,8 @@ def test_english_pipeline_skips_completed_stages(tmp_path, monkeypatch):
 
     async def finish_language(*args):
         stages = {
-            "correcting_pass_1": "corrected_pass_1",
-            "correcting_pass_2": "corrected",
             "translating": "translated",
+            "english_polish": "english_polished",
         }
         calls.append(args[3])
         current = Job.model_validate(store.get("job", job.job_id))
@@ -183,8 +180,7 @@ def test_english_pipeline_skips_completed_stages(tmp_path, monkeypatch):
     )
 
     assert calls == [
-        "correcting_pass_1",
-        "correcting_pass_2",
         "translating",
+        "english_polish",
         "shortform",
     ]

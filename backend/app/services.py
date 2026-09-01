@@ -82,10 +82,9 @@ WORKFLOW_RANK = {
     "media_ready": 1,
     "speakers_detected": 2,
     "transcribed": 3,
-    "corrected_pass_1": 4,
-    "corrected": 5,
-    "translated": 6,
-    "shortform_ideas": 7,
+    "translated": 4,
+    "english_polished": 5,
+    "shortform_ideas": 6,
 }
 
 CORRECTION_PROMPT = """You are correcting Korean automatic speech recognition output.
@@ -102,11 +101,24 @@ Never change locked segments. Return only JSON: {"corrected_segments":[{"segment
 "corrected_korean":"...","change_reason":["terminology"],"confidence":0.9,
 "uncertain_phrases":[]}]}"""
 
-TRANSLATION_PROMPT = """Translate corrected Korean podcast dialogue into natural conversational English.
+TRANSLATION_PROMPT = """Translate Korean podcast dialogue (the raw_korean field) into natural conversational English.
 Preserve meaning, intention, emotion, sarcasm, uncertainty, interruptions, terminology, and profanity.
 Use speaker labels to preserve each voice and turn-taking. Never invent a speaker identity.
 Use contractions naturally. Do not add explanations or create subtitle line breaks.
 Return only JSON: {"translations":[{"segment_id":"...","english":"...","warnings":[]}]}"""
+
+ENGLISH_POLISH_PROMPT = """You are a native-English copy editor polishing a draft English translation of Korean podcast dialogue.
+
+The text below (the `english` field of each segment) is a draft English translation. It may sound awkward, overly literal, or choppy because it follows Korean sentence structure. Your job is to make it read like natural, fluent spoken English while staying faithful to what was said. Read the `english` field as your source text and improve it.
+
+Rules:
+- Keep the meaning, intention, emotion, sarcasm, uncertainty, interruptions, terminology, and profanity intact. Do not soften or change what was said.
+- Fix awkward phrasing, overly literal Koreanisms, and unnatural word order so it reads like a native English speaker talking.
+- Do not add new facts, explanations, or editorial commentary. Do not delete real content to make it shorter.
+- Keep the speaker's voice and turn-taking. Do not invent a speaker identity.
+- Use contractions naturally.
+- Do not create subtitle line breaks.
+- Return only JSON: {"translations":[{"segment_id":"...","english":"...","warnings":[]}]}"""
 
 POST_COPY_PROMPT = """# Project: Twitter/X Clip Captions
 
@@ -126,75 +138,58 @@ Never name or identify a speaker. The audio cannot reliably distinguish who is s
 
 Always use this structure:
 
-One sentence explaining the clip's central argument (no speaker name).
+A short intro paragraph (2-4 sentences) that conveys what the clip is about — enough context that a reader who reads ONLY the intro knows the clip's central message. No speaker name. Not a single sentence; not a wall of text.
 
-"Supporting quote or paragraph."
+"Substantive quote — a core piece of the clip."
 
-"Supporting quote or paragraph."
+"Substantive quote — a core piece of the clip."
 
-"Strong concluding quote or paragraph."
+"Strong concluding quote — the clip's most powerful moment."
 
-Do not add a title, introduction, explanation, hashtags, emojis, timestamps, or commentary unless requested.
+Do not add a title, hashtags, emojis, timestamps, or commentary unless requested.
 
-## Opening sentence
+## Opening intro paragraph
 
-Start the post with one crisp opening sentence that summarizes the point of the clip — the single takeaway a viewer should walk away with. No speaker name or attribution.
+Start the post with a short intro paragraph that conveys the clip's message. A reader should be able to tell what the clip is about from the intro alone.
 
-The opening sentence must:
+The intro must:
 
-* State the clip's point (the takeaway), not merely describe the topic.
-* Stand alone: a reader who sees only this sentence should get the gist.
+* Convey the clip's core message and context — what is being discussed, why it matters, and the speaker's stance. It is fine to use a couple of sentences of framing before the point.
+* Stand alone: a reader who sees only the intro should understand the clip's subject, not be left guessing.
 * Be assertive and interesting without misrepresenting what was said.
-* Stay short — ideally under 20 words, never over 30.
+* Be a paragraph, not a single sentence — but keep it tight (roughly 30-60 words). It should not be a long essay.
 
 Example:
 
-Open-source AI is essential to keeping research accessible and preventing a handful of labs from controlling the field.
+The clip is about why crypto exchanges and platforms keep failing to go mainstream: they try to be everything to everyone, so they end up being nothing to anyone. The speaker argues the winning move is to pick a side — be the low-friction platform regular people actually use, not the one that lectures its users.
 
-## Quote selection: choose the right length
+## Quote selection: carry the core of the clip
 
-After the opening statement, include 3–7 quotes that build the argument. Judge each clip and decide whether short punchy quotes or longer paragraph quotes serve it better. Do not default to one length.
+After the intro, include 2-4 quotes that carry the clip's core content. The quotes are the substance of the clip, not a series of one-liners.
 
-Use short single-sentence quotes (roughly under 12 words each) when the clip is meant to be provocative: a bold claim, a sharp rebuke, a hot take. Short quotes land harder and read as confident.
+The quotes must:
 
-Use longer paragraph quotes (multiple sentences, preserving the speaker's full reasoning) when the clip needs nuance: a careful explanation, a tradeoff, a chain of reasoning, or any argument that falls apart when cut to a fragment. Give these quotes enough context to stand on their own.
-
-Whichever length you choose, every quote must:
-
+* Contain the core pieces of the clip — the key arguments, the sharpest claims, the reasoning that makes the clip worth watching. If a stretch of the take is essential, quote it at length.
+* NOT be a string of short isolated sentences jotted down from the transcript. Combine, condense, and rewrite where needed so each quote delivers real substance.
 * Follow the logical progression of the original argument.
-* Preserve the speaker's meaning, tone, and level of certainty.
-* Prioritize concrete, provocative language over generic statements.
-* Work independently as a readable excerpt.
+* Work independently as a readable excerpt that stands on its own.
 
-Arrange the quotes so they create a narrative:
+## Transcript fidelity: faithful to meaning, not verbatim
 
-1. Establish what would be lost or what is at stake.
-2. Explain the practical consequence or the reasoning behind it.
-3. Identify the danger, tension, or concentration of power.
-4. End with the strongest conclusion.
+The quotes do not need to follow the actual transcript word-for-word. Use the form of quotes, but rewrite and condense so they deliver the substance of what was said. It is acceptable to:
 
-## Transcript fidelity
-
-Stay loyal to the original transcript.
-
-Light editing is allowed to:
-
-* Remove filler words and repetition.
-* Correct obvious transcription errors.
-* Shorten a sentence without changing its meaning.
-* Replace unclear pronouns with the subject being discussed.
-* Make spoken grammar readable.
+* Merge several sentences of the same take into one flowing quoted passage.
+* Smooth out spoken grammar, filler, and repetition.
+* Rewrite a loose excerpt so it reads as a coherent, substantive quote.
+* Combine related statements from the same take into a single stronger quote.
 
 Do not:
 
 * Invent arguments the speaker did not make.
 * Turn an implication into a direct claim.
 * Make the speaker sound more certain than they were.
-* Combine unrelated statements into a fabricated quote.
+* Combine statements from genuinely different topics into a fabricated quote.
 * Add fashionable language such as "accountability," "democratization," or "counterweight" unless the speaker expressed that idea.
-* Present a loose paraphrase inside quotation marks.
-
-If a line cannot remain faithful while being shortened, exclude it or keep it at full length rather than distort it.
 
 ## Style
 
@@ -226,10 +221,10 @@ Include the keyword "Korea" ONLY when the clip's transcript itself is genuinely 
 
 Before answering, verify:
 
-* Does the opening sentence crisply summarize the clip's point?
+* Does the intro paragraph convey the clip's core message and context, so a reader who reads only the intro knows what the clip is about?
 * Is there no speaker name or attribution anywhere in the post?
-* Can every quoted line be traced to something actually said in the transcript?
-* Did shortening preserve the original meaning, and does the chosen quote length fit the clip's nature?
+* Can every quoted line be traced to something actually said in the transcript (faithful to meaning, even if not verbatim)?
+* Do the quotes carry the core pieces of the clip rather than reading as a string of short isolated sentences?
 * Do the quotes collectively explain why the argument matters?
 * Is the strongest quote placed near the end?
 * Are there no em dashes (—) or en dashes (–) anywhere in the headline or body?
@@ -240,8 +235,8 @@ Before answering, verify:
 
 Return exactly one JSON object, nothing else:
 
-- "headline": the opening sentence (a crisp summary of the clip's point, no speaker name).
-- "body": the 3–7 supporting quotes (short or paragraph length as appropriate), each wrapped in double quotes ("like this"), each on its own line, separated by blank lines, in narrative order.
+- "headline": the intro paragraph (2-4 sentences conveying the clip's core message, no speaker name).
+- "body": the 2-4 substantive quotes carrying the clip's core content, each wrapped in double quotes ("like this"), each on its own line, separated by blank lines, in narrative order.
 
 Return only JSON: {"headline":"...","body":"..."}"""
 
@@ -1042,6 +1037,121 @@ def align_segments_to_speakers(
     ]
 
 
+# ---- Continuous-take merging -------------------------------------------------
+# whisper's ASR emits very short segments (median ~2s, most under 3s): with
+# vad_filter it splits at every 500ms of silence, so a speaker's continuous
+# monologue becomes dozens of tiny fragments that read as disconnected
+# sentences. merge_segments_into_takes() groups consecutive same-speaker
+# segments separated by only short pauses into a single longer "take" (a
+# paragraph), so translation sees full context and captions flow continuously
+# instead of chopping every clause into its own caption block.
+
+TAKE_MAX_GAP_MS = 1_200  # pause longer than this = a new take
+TAKE_MAX_DURATION_MS = 45_000  # cap a single take's span
+
+
+def _best_english(segment: Any) -> str:
+    """Return the best available English translation for a segment.
+
+    Prefers the polished second-pass English (english_pass_2) when present,
+    falling back to the first-pass translation (english).
+    """
+    pass_2 = str(getattr(segment, "english_pass_2", "") or "").strip()
+    if pass_2:
+        return pass_2
+    return str(getattr(segment, "english", "") or "").strip()
+
+
+def merge_segments_into_takes(segments: list[Segment]) -> list[Segment]:
+    """Merge consecutive same-speaker ASR fragments into continuous takes.
+
+    Two adjacent segments merge when they share a clip and speaker, the gap
+    between them is at most TAKE_MAX_GAP_MS, and the combined take stays under
+    TAKE_MAX_DURATION_MS. Language fields are joined with a space; word lists
+    are concatenated so caption timing stays accurate. Segments that can't
+    merge (speaker change, long pause, clip boundary, too long) pass through
+    unchanged.
+    """
+    if not segments:
+        return segments
+    ordered = sorted(segments, key=lambda s: (s.start_ms, s.end_ms))
+    merged: list[Segment] = []
+    current: list[Segment] = [ordered[0]]
+
+    def flush() -> None:
+        if len(current) == 1:
+            merged.append(current[0])
+            return
+        first, last = current[0], current[-1]
+        joined = first.model_copy(
+            update={
+                "end_ms": last.end_ms,
+                "raw_korean": " ".join(
+                    s.raw_korean.strip() for s in current if s.raw_korean.strip()
+                ),
+                "pass_1_korean": " ".join(
+                    s.pass_1_korean.strip()
+                    for s in current
+                    if s.pass_1_korean.strip()
+                ),
+                "pass_2_korean": " ".join(
+                    s.pass_2_korean.strip()
+                    for s in current
+                    if s.pass_2_korean.strip()
+                ),
+                "english": " ".join(
+                    s.english.strip() for s in current if s.english.strip()
+                ),
+                "english_pass_2": " ".join(
+                    s.english_pass_2.strip()
+                    for s in current
+                    if s.english_pass_2.strip()
+                ),
+                "words": [word for s in current for word in s.words],
+                "change_reasons": list(
+                    dict.fromkeys(
+                        reason
+                        for s in current
+                        for reason in s.change_reasons
+                    )
+                )
+                + ["merged_into_take"],
+            }
+        )
+        merged.append(joined)
+
+    for segment in ordered[1:]:
+        previous = current[-1]
+        same_clip = (
+            segment.clip_id is not None
+            and segment.clip_id == previous.clip_id
+        )
+        same_speaker = (
+            segment.speaker_id is not None
+            and segment.speaker_id == previous.speaker_id
+        )
+        gap = segment.start_ms - previous.end_ms
+        combined_duration = segment.end_ms - current[0].start_ms
+        if (
+            same_clip
+            and same_speaker
+            and gap <= TAKE_MAX_GAP_MS
+            and combined_duration <= TAKE_MAX_DURATION_MS
+            and not previous.locked
+            and not segment.locked
+        ):
+            current.append(segment)
+        else:
+            flush()
+            current = [segment]
+    flush()
+
+    return [
+        segment.model_copy(update={"segment_id": f"seg_{index + 1:06d}"})
+        for index, segment in enumerate(merged)
+    ]
+
+
 def _annotation_turns(annotation: Any) -> list[SpeakerTurn]:
     rows = (
         annotation.itertracks(yield_label=True)
@@ -1680,6 +1790,11 @@ def run_transcription(
         transcribed_segments = align_segments_to_speakers(
             transcribed_segments, detected_turns
         )
+        # Merge whisper's tiny same-speaker ASR fragments into continuous
+        # "takes" (paragraphs) so translation sees full context and captions
+        # flow as a paragraph instead of chopping every clause into its own
+        # short caption block.
+        transcribed_segments = merge_segments_into_takes(transcribed_segments)
         existing_speakers = [
             Speaker.model_validate(item)
             for item in store.list("speaker", project_id)
@@ -2028,7 +2143,9 @@ def _post_copy_source(
             and item.get("start_ms", -1) < clip.end_ms
             and item.get("end_ms", -1) > clip.start_ms
         )
-        english = str(item.get("english") or "").strip()
+        english = str(
+            item.get("english_pass_2") or item.get("english") or ""
+        ).strip()
         if not belongs_to_clip or not english:
             continue
         speaker_id = item.get("speaker_id")
@@ -2082,18 +2199,13 @@ def format_post_copy_quote_blocks(body: str) -> str:
             formatted.append(block)
             continue
         quote = " ".join(match.group("quote").split())
-        sentences = [
-            sentence.strip()
-            for sentence in re.split(r"(?<=[.!?])\s+(?=[A-Z0-9])", quote)
-            if sentence.strip()
-        ]
-        if len(sentences) < 3:
-            formatted.append(block)
-            continue
         speaker = match.group("speaker")
-        for index, sentence in enumerate(sentences):
-            prefix = f"{speaker}: " if speaker and index == 0 else ""
-            formatted.append(f'{prefix}"{sentence}"')
+        # Keep the quote whole: a substantive multi-sentence passage is the goal,
+        # not a series of one-sentence fragments. Only split a quoted block into
+        # separate quote blocks when it is genuinely two or more independent
+        # quotes (e.g. separated by blank lines in the source), which the block
+        # split above already handles. We never break one quote into one-liners.
+        formatted.append(f'{f"{speaker}: " if speaker else ""}"{quote}"')
     return "\n\n".join(formatted)
 
 
@@ -2183,7 +2295,9 @@ def shortform_transcript_payload(
             "e": int(item.get("end_ms", 0)),
             "ko": text,
         }
-        english = str(item.get("english") or "").strip()
+        english = str(
+            item.get("english_pass_2") or item.get("english") or ""
+        ).strip()
         if english:
             entry["en"] = english
         compact.append(entry)
@@ -2445,7 +2559,11 @@ def _dialogue_batches(
 def _language_rows(
     result: dict[str, Any], stage: str
 ) -> list[dict[str, Any]]:
-    key = "translations" if stage == "translating" else "corrected_segments"
+    key = (
+        "translations"
+        if stage in {"translating", "english_polish"}
+        else "corrected_segments"
+    )
     rows = result.get(key)
     # Tolerate the model returning the key missing or wrapped oddly: fall
     # back to scanning for the first list-of-dicts value in the response.
@@ -2474,9 +2592,8 @@ async def run_language_stage(
 ) -> None:
     job = Job.model_validate(store.get("job", job_id))
     prompts = {
-        "correcting_pass_1": CORRECTION_PROMPT,
-        "correcting_pass_2": CONSISTENCY_PROMPT,
         "translating": TRANSLATION_PROMPT,
+        "english_polish": ENGLISH_POLISH_PROMPT,
     }
     try:
         job.stage, job.progress = stage, 0.1
@@ -2487,9 +2604,8 @@ async def run_language_stage(
             for item in store.list("segment", project_id)
         }
         stage_field = {
-            "correcting_pass_1": "pass_1_korean",
-            "correcting_pass_2": "pass_2_korean",
             "translating": "english",
+            "english_polish": "english_pass_2",
         }[stage]
         batches = _dialogue_batches(payload["segments"])
 
@@ -2504,6 +2620,13 @@ async def run_language_stage(
                 if item.get("segment_id") in segments
                 and not segments[item["segment_id"]].locked
                 and not getattr(segments[item["segment_id"]], stage_field)
+                # The polish stage needs a draft English to improve; a segment
+                # whose first-pass translation failed must wait for a retry of
+                # the translating stage, not be polished from nothing.
+                and (
+                    stage != "english_polish"
+                    or str(segments[item["segment_id"]].english or "").strip()
+                )
             ]
             if required_ids:
                 pending.append((batch, required_ids))
@@ -2591,6 +2714,16 @@ async def run_language_stage(
                         segment.status = (
                             "warning" if segment.warnings else "translated"
                         )
+                    elif stage == "english_polish":
+                        segment.english_pass_2 = row.get(
+                            "english", segment.english_pass_2
+                        )
+                        segment.warnings = row.get("warnings", [])
+                        segment.status = (
+                            "warning"
+                            if segment.warnings
+                            else "english_polished"
+                        )
                     else:
                         setattr(
                             segment,
@@ -2640,9 +2773,8 @@ async def run_language_stage(
                 *(guarded(batch, rids) for batch, rids in pending)
             )
         status = {
-            "correcting_pass_1": "corrected_pass_1",
-            "correcting_pass_2": "corrected",
             "translating": "translated",
+            "english_polish": "english_polished",
         }[stage]
         job.stage, job.progress = status, 1
         job.warning_count = sum(
@@ -2723,28 +2855,6 @@ async def run_english_pipeline(
         ),
         (
             3,
-            "corrected_pass_1",
-            lambda: run_language_stage(
-                store,
-                project_id,
-                job_id,
-                "correcting_pass_1",
-                clips,
-            ),
-        ),
-        (
-            4,
-            "corrected",
-            lambda: run_language_stage(
-                store,
-                project_id,
-                job_id,
-                "correcting_pass_2",
-                clips,
-            ),
-        ),
-        (
-            5,
             "translated",
             lambda: run_language_stage(
                 store,
@@ -2755,7 +2865,18 @@ async def run_english_pipeline(
             ),
         ),
         (
-            6,
+            4,
+            "english_polished",
+            lambda: run_language_stage(
+                store,
+                project_id,
+                job_id,
+                "english_polish",
+                clips,
+            ),
+        ),
+        (
+            5,
             "shortform_ideas",
             lambda: run_shortform_ideas_stage(store, project_id, job_id, clips),
         ),
@@ -2875,11 +2996,7 @@ def caption_source_signature(
     source = []
     for data in segments:
         segment = Segment.model_validate(data)
-        korean = (
-            segment.pass_2_korean
-            or segment.pass_1_korean
-            or segment.raw_korean
-        )
+        korean = segment.raw_korean
         source.append(
             {
                 "id": segment.segment_id,
@@ -2887,7 +3004,7 @@ def caption_source_signature(
                 "end": segment.end_ms,
                 "clip": segment.clip_id,
                 "speaker": segment.speaker_id,
-                "text": segment.english or korean
+                "text": _best_english(segment) or korean
                 if language == "en"
                 else korean,
             }
@@ -2947,12 +3064,8 @@ def generate_caption_track(
     words: list[CaptionWord] = []
     for data in sorted(segments, key=lambda item: item.get("start_ms", 0)):
         segment = Segment.model_validate(data)
-        korean = (
-            segment.pass_2_korean
-            or segment.pass_1_korean
-            or segment.raw_korean
-        )
-        text = segment.english or korean if language == "en" else korean
+        korean = segment.raw_korean
+        text = _best_english(segment) or korean if language == "en" else korean
         text_words = text.split()
         if not text_words:
             continue
@@ -3186,12 +3299,8 @@ def export_ass_subtitles(
         segment = Segment.model_validate(data)
         start = max(previous_end, segment.start_ms)
         end = max(start + 80, segment.end_ms)
-        korean = (
-            segment.pass_2_korean
-            or segment.pass_1_korean
-            or segment.raw_korean
-        )
-        english = segment.english or korean
+        korean = segment.raw_korean
+        english = _best_english(segment) or korean
         if bilingual:
             lines = [
                 *wrap_subtitle(korean, style.max_words_per_line),
@@ -3320,8 +3429,8 @@ def export_subtitles(
         segment = Segment.model_validate(data)
         start = max(previous_end, segment.start_ms)
         end = max(start + 80, segment.end_ms)
-        korean = segment.pass_2_korean or segment.pass_1_korean or segment.raw_korean
-        english = segment.english or korean
+        korean = segment.raw_korean
+        english = _best_english(segment) or korean
         if bilingual:
             lines = [
                 *wrap_subtitle(korean, max_words_per_line),
