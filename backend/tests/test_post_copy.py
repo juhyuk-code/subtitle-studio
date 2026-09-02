@@ -125,12 +125,14 @@ def test_post_copy_prompt_follows_the_master_format():
 
 
 def test_post_copy_prompt_enforces_first_person_human_voice():
-    assert "FIRST PERSON" in POST_COPY_PROMPT
+    assert "FIRST-PERSON PLURAL" in POST_COPY_PROMPT
+    assert '"we" as the perspective' in POST_COPY_PROMPT
+    assert "NEVER use \"I\"" in POST_COPY_PROMPT
     assert "This clip explores" in POST_COPY_PROMPT  # listed as a forbidden opener
     assert "The clip is about" in POST_COPY_PROMPT   # listed as a forbidden opener
     assert "The speaker argues" in POST_COPY_PROMPT   # listed as a forbidden opener
-    assert "person sharing this clip" in POST_COPY_PROMPT
-    assert "human tweeted it" in POST_COPY_PROMPT
+    assert "someone sharing this clip" in POST_COPY_PROMPT
+    assert "podcast/channel speaking as one voice" in POST_COPY_PROMPT
 
 
 def test_long_quote_is_kept_whole_not_split_into_one_liners():

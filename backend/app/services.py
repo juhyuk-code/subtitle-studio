@@ -150,30 +150,32 @@ Do not add a title, hashtags, emojis, timestamps, or commentary unless requested
 
 ## Opening intro paragraph
 
-Start the post with a short intro paragraph, written in YOUR OWN voice as a real
-person sharing this clip. It must read like a human tweeted it — first person,
-with a point of view — not like a detached description of the video.
+Start the post with a short intro paragraph, written in a personal, human voice
+as someone sharing this clip with their audience — but always from the "we"
+perspective, not "I". This is not a personal account; it reads like the
+podcast/channel speaking as one voice. The tone stays personal, direct, and
+conversational, never clinical or detached.
 
 The intro must:
 
 * Convey the clip's core message and context — what is being discussed, why it
   matters, and the stance. It is fine to use a couple of sentences of framing
   before the point.
-* Be written in the FIRST PERSON as a real person's take, not third-person
-  narration. NEVER start with "This clip explores...", "The clip is about...",
-  "The speaker argues...", "In this clip...", or any other clinical framing that
-  describes the video from the outside. Write the way a person would write when
-  they found something worth sharing and are telling you what it made them
-  think.
+* Use the FIRST-PERSON PLURAL "we" as the perspective ("we keep coming back to
+  this...", "it feels like...", "what stuck with us..."). NEVER use "I".
+  NEVER write in third-person narration ("This clip explores...", "The clip is
+  about...", "The speaker argues...", "In this clip..."). Write the way a
+  person would write when they found something worth sharing and are telling
+  you what it made them think.
 * Stand alone: a reader who sees only the intro should understand the clip's
   subject, not be left guessing.
 * Be assertive, specific, and interesting without misrepresenting what was said.
 * Be a paragraph, not a single sentence — but keep it tight (roughly 30-60
   words). It should not be a long essay.
 
-Example (first-person human voice, not a video description):
+Example (personal tone, "we" perspective, not a video description):
 
-I keep coming back to this one: crypto platforms keep failing to go mainstream
+We keep coming back to this one: crypto platforms keep failing to go mainstream
 because they try to be everything to everyone and end up being nothing to
 anyone. The smarter move is to pick a side and be the boring, low-friction thing
 regular people actually use. That's the whole argument, and it's hard to argue
@@ -238,7 +240,7 @@ Include the keyword "Korea" ONLY when the clip's transcript itself is genuinely 
 Before answering, verify:
 
 * Does the intro paragraph convey the clip's core message and context, so a reader who reads only the intro knows what the clip is about?
-* Is the intro written in the FIRST PERSON as a real person's take — no "This clip explores...", "The clip is about...", "The speaker argues...", or any third-person video description?
+* Is the intro written in the FIRST-PERSON PLURAL "we" as a personal, human take — never "I", and never "This clip explores...", "The clip is about...", "The speaker argues...", or any third-person video description?
 * Is there no speaker name or attribution anywhere in the post?
 * Can every quoted line be traced to something actually said in the transcript (faithful to meaning, even if not verbatim)?
 * Do the quotes carry the core pieces of the clip rather than reading as a string of short isolated sentences?
