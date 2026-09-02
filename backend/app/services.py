@@ -150,18 +150,36 @@ Do not add a title, hashtags, emojis, timestamps, or commentary unless requested
 
 ## Opening intro paragraph
 
-Start the post with a short intro paragraph that conveys the clip's message. A reader should be able to tell what the clip is about from the intro alone.
+Start the post with a short intro paragraph, written in a personal, human voice
+as someone sharing this clip with their audience — but always from the "we"
+perspective, not "I". This is not a personal account; it reads like the
+podcast/channel speaking as one voice. The tone stays personal, direct, and
+conversational, never clinical or detached.
 
 The intro must:
 
-* Convey the clip's core message and context — what is being discussed, why it matters, and the speaker's stance. It is fine to use a couple of sentences of framing before the point.
-* Stand alone: a reader who sees only the intro should understand the clip's subject, not be left guessing.
-* Be assertive and interesting without misrepresenting what was said.
-* Be a paragraph, not a single sentence — but keep it tight (roughly 30-60 words). It should not be a long essay.
+* Convey the clip's core message and context — what is being discussed, why it
+  matters, and the stance. It is fine to use a couple of sentences of framing
+  before the point.
+* Use the FIRST-PERSON PLURAL "we" as the perspective ("we keep coming back to
+  this...", "it feels like...", "what stuck with us..."). NEVER use "I".
+  NEVER write in third-person narration ("This clip explores...", "The clip is
+  about...", "The speaker argues...", "In this clip..."). Write the way a
+  person would write when they found something worth sharing and are telling
+  you what it made them think.
+* Stand alone: a reader who sees only the intro should understand the clip's
+  subject, not be left guessing.
+* Be assertive, specific, and interesting without misrepresenting what was said.
+* Be a paragraph, not a single sentence — but keep it tight (roughly 30-60
+  words). It should not be a long essay.
 
-Example:
+Example (personal tone, "we" perspective, not a video description):
 
-The clip is about why crypto exchanges and platforms keep failing to go mainstream: they try to be everything to everyone, so they end up being nothing to anyone. The speaker argues the winning move is to pick a side — be the low-friction platform regular people actually use, not the one that lectures its users.
+We keep coming back to this one: crypto platforms keep failing to go mainstream
+because they try to be everything to everyone and end up being nothing to
+anyone. The smarter move is to pick a side and be the boring, low-friction thing
+regular people actually use. That's the whole argument, and it's hard to argue
+with.
 
 ## Quote selection: carry the core of the clip
 
@@ -222,6 +240,7 @@ Include the keyword "Korea" ONLY when the clip's transcript itself is genuinely 
 Before answering, verify:
 
 * Does the intro paragraph convey the clip's core message and context, so a reader who reads only the intro knows what the clip is about?
+* Is the intro written in the FIRST-PERSON PLURAL "we" as a personal, human take — never "I", and never "This clip explores...", "The clip is about...", "The speaker argues...", or any third-person video description?
 * Is there no speaker name or attribution anywhere in the post?
 * Can every quoted line be traced to something actually said in the transcript (faithful to meaning, even if not verbatim)?
 * Do the quotes carry the core pieces of the clip rather than reading as a string of short isolated sentences?
@@ -2209,6 +2228,17 @@ def format_post_copy_quote_blocks(body: str) -> str:
     return "\n\n".join(formatted)
 
 
+def _strip_post_copy_dashes(text: str) -> str:
+    """Replace em/en dashes with commas/periods (prompt forbids them)."""
+    import re as _re
+    # em dash with any surrounding whitespace -> comma
+    text = _re.sub(r"\s*\u2014\s*", ", ", text)
+    # en dash -> hyphen (ranges)
+    text = text.replace("\u2013", "-")
+    text = _re.sub(r" +", " ", text)
+    return text.strip()
+
+
 async def generate_post_copy(
     store: Store, project_id: str, clip_id: str
 ) -> PostCopy:
@@ -2253,6 +2283,8 @@ async def generate_post_copy(
         raise RuntimeError(
             "The language model returned incomplete post copy. Try again."
         )
+    headline = _strip_post_copy_dashes(headline)
+    body = _strip_post_copy_dashes(body)
     body = format_post_copy_quote_blocks(body)
     post_copy = PostCopy(
         clip_id=clip_id,

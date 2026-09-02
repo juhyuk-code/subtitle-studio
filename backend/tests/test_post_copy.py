@@ -116,12 +116,23 @@ def test_post_copy_prompt_follows_the_master_format():
     assert "clip's most important idea" in POST_COPY_PROMPT
     assert "Never name or identify a speaker" in POST_COPY_PROMPT
     assert "short intro paragraph" in POST_COPY_PROMPT
-    assert "roughly 30-60 words" in POST_COPY_PROMPT
+    assert "30-60" in POST_COPY_PROMPT
     assert "2-4 quotes that carry the clip's core content" in POST_COPY_PROMPT
     assert "do not need to follow the actual transcript word-for-word" in POST_COPY_PROMPT
     assert "separated by blank lines" in POST_COPY_PROMPT
     assert "Return only JSON" in POST_COPY_PROMPT
     assert "Never use em dashes" in POST_COPY_PROMPT
+
+
+def test_post_copy_prompt_enforces_first_person_human_voice():
+    assert "FIRST-PERSON PLURAL" in POST_COPY_PROMPT
+    assert '"we" as the perspective' in POST_COPY_PROMPT
+    assert "NEVER use \"I\"" in POST_COPY_PROMPT
+    assert "This clip explores" in POST_COPY_PROMPT  # listed as a forbidden opener
+    assert "The clip is about" in POST_COPY_PROMPT   # listed as a forbidden opener
+    assert "The speaker argues" in POST_COPY_PROMPT   # listed as a forbidden opener
+    assert "someone sharing this clip" in POST_COPY_PROMPT
+    assert "podcast/channel speaking as one voice" in POST_COPY_PROMPT
 
 
 def test_long_quote_is_kept_whole_not_split_into_one_liners():
@@ -212,3 +223,13 @@ def test_post_copy_prompt_enforces_korea_keyword_rule():
     assert "transcript evidence required" in POST_COPY_PROMPT
     assert "never on the fact that the podcast happens to be Korean" in POST_COPY_PROMPT
     assert "Korea" in POST_COPY_PROMPT.split("## Korea keyword rule")[1]
+
+
+def test_strip_post_copy_dashes():
+    from backend.app.services import _strip_post_copy_dashes
+
+    assert "—" not in _strip_post_copy_dashes("one — two")
+    assert "–" not in _strip_post_copy_dashes("one – two")
+    assert _strip_post_copy_dashes("real quick — it matters") == "real quick, it matters"
+    assert _strip_post_copy_dashes("lines 10–20") == "lines 10-20"
+    assert _strip_post_copy_dashes("no dashes") == "no dashes"
